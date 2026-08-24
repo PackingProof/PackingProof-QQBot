@@ -1,19 +1,29 @@
 using System.Windows;
-using System.Windows.Controls;
+using WpfButton = System.Windows.Controls.Button;
+using WpfComboBox = System.Windows.Controls.ComboBox;
+using WpfControl = System.Windows.Controls.Control;
+using WpfListBox = System.Windows.Controls.ListBox;
+using WpfPanel = System.Windows.Controls.Panel;
+using WpfPasswordBox = System.Windows.Controls.PasswordBox;
+using WpfScrollViewer = System.Windows.Controls.ScrollViewer;
+using WpfSeparator = System.Windows.Controls.Separator;
+using WpfStackPanel = System.Windows.Controls.StackPanel;
+using WpfTextBlock = System.Windows.Controls.TextBlock;
+using WpfTextBox = System.Windows.Controls.TextBox;
 
 namespace PackingProof.QQBot;
 
 internal sealed class QQBotManagerWindow : Window
 {
     private readonly QQBotStateStore _store;
-    private readonly TextBox _appId = new();
-    private readonly PasswordBox _appSecret = new();
-    private readonly TextBox _host = new();
-    private readonly TextBox _groupOpenId = new();
-    private readonly ListBox _groups = new();
-    private readonly TextBox _size = new();
-    private readonly ComboBox _profile = new();
-    private readonly TextBlock _status = new();
+    private readonly WpfTextBox _appId = new();
+    private readonly WpfPasswordBox _appSecret = new();
+    private readonly WpfTextBox _host = new();
+    private readonly WpfTextBox _groupOpenId = new();
+    private readonly WpfListBox _groups = new();
+    private readonly WpfTextBox _size = new();
+    private readonly WpfComboBox _profile = new();
+    private readonly WpfTextBlock _status = new();
     private CancellationTokenSource? _runCancellation;
     private Task? _runTask;
 
@@ -31,43 +41,43 @@ internal sealed class QQBotManagerWindow : Window
 
     private UIElement BuildContent()
     {
-        var panel = new StackPanel { Margin = new Thickness(24) };
-        panel.Children.Add(new TextBlock { Text = "PackingProof QQBot", FontSize = 24, FontWeight = FontWeights.SemiBold });
-        panel.Children.Add(new TextBlock { Text = "首次填写后会在 PackingProof 中请求授权。AppSecret 仅加密保存在当前 Windows 用户账户", Margin = new Thickness(0, 6, 0, 18), TextWrapping = TextWrapping.Wrap });
+        var panel = new WpfStackPanel { Margin = new Thickness(24) };
+        panel.Children.Add(new WpfTextBlock { Text = "PackingProof QQBot", FontSize = 24, FontWeight = FontWeights.SemiBold });
+        panel.Children.Add(new WpfTextBlock { Text = "首次填写后会在 PackingProof 中请求授权。AppSecret 仅加密保存在当前 Windows 用户账户", Margin = new Thickness(0, 6, 0, 18), TextWrapping = TextWrapping.Wrap });
         AddField(panel, "QQ AppID", _appId);
         AddField(panel, "QQ AppSecret", _appSecret);
         AddField(panel, "PackingProof 地址", _host);
         panel.Children.Add(Row(Button("保存并授权", SaveAsync), Button("测试主机", TestHostAsync)));
-        panel.Children.Add(new Separator { Margin = new Thickness(0, 18, 0, 12) });
-        panel.Children.Add(new TextBlock { Text = "QQ 群白名单", FontWeight = FontWeights.SemiBold });
+        panel.Children.Add(new WpfSeparator { Margin = new Thickness(0, 18, 0, 12) });
+        panel.Children.Add(new WpfTextBlock { Text = "QQ 群白名单", FontWeight = FontWeights.SemiBold });
         panel.Children.Add(_groups);
         panel.Children.Add(Row(_groupOpenId, Button("添加", AddGroup), Button("删除选中", RemoveGroup)));
-        panel.Children.Add(new Separator { Margin = new Thickness(0, 18, 0, 12) });
-        panel.Children.Add(new TextBlock { Text = "视频发送", FontWeight = FontWeights.SemiBold });
+        panel.Children.Add(new WpfSeparator { Margin = new Thickness(0, 18, 0, 12) });
+        panel.Children.Add(new WpfTextBlock { Text = "视频发送", FontWeight = FontWeights.SemiBold });
         _profile.Items.Add("保持原编码并降低码率");
         _profile.Items.Add("转为 H.265");
-        panel.Children.Add(Row(new TextBlock { Text = "最大大小（MB）", VerticalAlignment = VerticalAlignment.Center }, _size, _profile, Button("保存视频设置", SaveDelivery)));
-        panel.Children.Add(new Separator { Margin = new Thickness(0, 18, 0, 12) });
+        panel.Children.Add(Row(new WpfTextBlock { Text = "最大大小（MB）", VerticalAlignment = VerticalAlignment.Center }, _size, _profile, Button("保存视频设置", SaveDelivery)));
+        panel.Children.Add(new WpfSeparator { Margin = new Thickness(0, 18, 0, 12) });
         panel.Children.Add(Row(Button("启动机器人", StartAsync), Button("停止机器人", Stop), Button("切换开机自动启动", ToggleStartup)));
         panel.Children.Add(_status);
-        return new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        return new WpfScrollViewer { Content = panel, VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto };
     }
 
-    private static void AddField(Panel panel, string label, Control control)
+    private static void AddField(WpfPanel panel, string label, WpfControl control)
     {
-        panel.Children.Add(new TextBlock { Text = label, Margin = new Thickness(0, 6, 0, 3) });
+        panel.Children.Add(new WpfTextBlock { Text = label, Margin = new Thickness(0, 6, 0, 3) });
         control.MinWidth = 300;
         panel.Children.Add(control);
     }
 
-    private static StackPanel Row(params UIElement[] children)
+    private static WpfStackPanel Row(params UIElement[] children)
     {
-        var panel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        var panel = new WpfStackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
         foreach (UIElement child in children) { child.Margin = new Thickness(0, 0, 8, 0); panel.Children.Add(child); }
         return panel;
     }
 
-    private static Button Button(string text, RoutedEventHandler handler) => new() { Content = text, Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(0, 0, 8, 0), }.Also(button => button.Click += handler);
+    private static WpfButton Button(string text, RoutedEventHandler handler) => new() { Content = text, Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(0, 0, 8, 0), }.Also(button => button.Click += handler);
 
     private void Load()
     {
