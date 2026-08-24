@@ -1,0 +1,8 @@
+bin/
+obj/
+.vs/
+.vscode/
+TestResults/
+*.user
+settings.json
+secrets.dat
