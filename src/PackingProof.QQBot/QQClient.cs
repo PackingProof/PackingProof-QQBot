@@ -113,6 +113,12 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
                 using JsonDocument payload = JsonDocument.Parse(await ReceiveAsync(socket, cancellationToken));
                 int op = ReadRequiredInt32(payload.RootElement.GetProperty("op"), "QQ 网关操作码");
                 if (op is 7 or 9) throw new InvalidOperationException("QQ 网关要求重新连接");
+                if (op == 0 && payload.RootElement.TryGetProperty("t", out JsonElement readyType)
+                    && string.Equals(readyType.GetString(), "READY", StringComparison.Ordinal))
+                {
+                    Console.WriteLine("QQ 网关已连接，机器人在线");
+                    continue;
+                }
                 if (op != 0 || !payload.RootElement.TryGetProperty("t", out JsonElement type) || type.GetString() is not ("GROUP_AT_MESSAGE_CREATE" or "GROUP_MESSAGE_CREATE")) continue;
                 GroupMessage? message = payload.RootElement.GetProperty("d").Deserialize<GroupMessage>();
                 if (message != null) _ = Task.Run(() => handler(message, cancellationToken), CancellationToken.None);
