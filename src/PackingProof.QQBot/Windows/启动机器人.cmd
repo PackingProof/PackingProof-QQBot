@@ -1,4 +1,4 @@
 @echo off
 chcp 65001 >nul
-"%~dp0PackingProof.QQBot.exe" --run
+"%~dp0PackingProof.QQBot.exe" --start
 pause

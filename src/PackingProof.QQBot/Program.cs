@@ -17,6 +17,7 @@ internal static class Program
             return args.FirstOrDefault()?.ToLowerInvariant() switch
             {
                 "--configure" => await ConfigureAsync(store),
+                "--start" => await StartAsync(store),
                 "--delivery-settings" => ConfigureDeliverySettings(store),
                 "--allow-group" => AllowGroup(store, args.Skip(1).FirstOrDefault()),
                 "--run" => await RunAsync(store),
@@ -40,6 +41,16 @@ internal static class Program
         store.Save(config, new QQBotSecrets { AppSecret = secret, ExtensionCredential = credential });
         Console.WriteLine("配置已保存。接下来双击“启动机器人”，在私聊中向机器人发送一个单号；如已开通群聊能力，也可在目标群 @机器人发送一个单号");
         return 0;
+    }
+
+    private static async Task<int> StartAsync(QQBotStateStore store)
+    {
+        if (store.LoadConfiguration() == null || store.LoadSecrets() == null)
+        {
+            Console.WriteLine("首次使用，请按提示完成机器人配置");
+            await ConfigureAsync(store);
+        }
+        return await RunAsync(store);
     }
 
     private static int AllowGroup(QQBotStateStore store, string? group)
