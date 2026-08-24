@@ -1,9 +1,9 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 
-namespace PackingProof.QqBot;
+namespace PackingProof.QQBot;
 
-public sealed record QqBotConfiguration
+public sealed record QQBotConfiguration
 {
     public const int DefaultDeliveryMaxSizeMb = 190;
     public const int MinimumDeliveryMaxSizeMb = 1;
@@ -18,7 +18,7 @@ public sealed record QqBotConfiguration
     public int DeliveryMaxSizeMb { get; init; } = DefaultDeliveryMaxSizeMb;
     public string DeliveryProfile { get; init; } = SourceCodecTargetSizeProfile;
 
-    public QqBotConfiguration ValidateDeliverySettings()
+    public QQBotConfiguration ValidateDeliverySettings()
     {
         if (DeliveryMaxSizeMb is < MinimumDeliveryMaxSizeMb or > MaximumDeliveryMaxSizeMb)
             throw new InvalidDataException($"deliveryMaxSizeMb 必须在 {MinimumDeliveryMaxSizeMb} 到 {MaximumDeliveryMaxSizeMb} 之间");
@@ -29,7 +29,7 @@ public sealed record QqBotConfiguration
     }
 }
 
-public sealed record QqBotSecrets
+public sealed record QQBotSecrets
 {
     public string AppSecret { get; init; } = "";
     public ExtensionCredentialState? ExtensionCredential { get; init; }
@@ -42,20 +42,20 @@ public sealed record ExtensionCredentialState
     public int CredentialGeneration { get; init; }
 }
 
-public sealed class QqBotStateStore
+public sealed class QQBotStateStore
 {
-    private static readonly byte[] Entropy = "PackingProof.QqBot.v1"u8.ToArray();
+    private static readonly byte[] Entropy = "PackingProof.QQBot.v1"u8.ToArray();
+    private static readonly byte[] LegacyEntropy = "PackingProof.QqBot.v1"u8.ToArray();
     private readonly string _directory;
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
-    public QqBotStateStore(string? directory = null) => _directory = directory ?? Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ExpressPackingMonitoring", "QqBot");
+    public QQBotStateStore(string? directory = null) => _directory = directory ?? ResolveDefaultDirectory();
 
     public string DirectoryPath => _directory;
-    public QqBotConfiguration? LoadConfiguration() => Load<QqBotConfiguration>("settings.json", false);
-    public QqBotSecrets? LoadSecrets() => Load<QqBotSecrets>("secrets.dat", true);
+    public QQBotConfiguration? LoadConfiguration() => Load<QQBotConfiguration>("settings.json", false);
+    public QQBotSecrets? LoadSecrets() => Load<QQBotSecrets>("secrets.dat", true);
 
-    public void Save(QqBotConfiguration configuration, QqBotSecrets secrets)
+    public void Save(QQBotConfiguration configuration, QQBotSecrets secrets)
     {
         Directory.CreateDirectory(_directory);
         File.WriteAllText(Path.Combine(_directory, "settings.json"), JsonSerializer.Serialize(configuration, _jsonOptions));
@@ -68,7 +68,19 @@ public sealed class QqBotStateStore
         string path = Path.Combine(_directory, fileName);
         if (!File.Exists(path)) return default;
         byte[] data = File.ReadAllBytes(path);
-        if (protectedFile) data = ProtectedData.Unprotect(data, Entropy, DataProtectionScope.CurrentUser);
+        if (protectedFile)
+        {
+            try { data = ProtectedData.Unprotect(data, Entropy, DataProtectionScope.CurrentUser); }
+            catch (CryptographicException) { data = ProtectedData.Unprotect(data, LegacyEntropy, DataProtectionScope.CurrentUser); }
+        }
         return JsonSerializer.Deserialize<T>(data, _jsonOptions);
+    }
+
+    private static string ResolveDefaultDirectory()
+    {
+        string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ExpressPackingMonitoring");
+        string current = Path.Combine(root, "QQBot");
+        string legacy = Path.Combine(root, "QqBot");
+        return !Directory.Exists(current) && Directory.Exists(legacy) ? legacy : current;
     }
 }

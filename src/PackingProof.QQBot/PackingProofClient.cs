@@ -4,16 +4,16 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-namespace PackingProof.QqBot;
+namespace PackingProof.QQBot;
 
-public sealed class PackingProofClient(HttpClient http, QqBotConfiguration configuration, ExtensionCredentialState credential)
+public sealed class PackingProofClient(HttpClient http, QQBotConfiguration configuration, ExtensionCredentialState credential)
 {
     private readonly HttpClient _http = http;
-    private readonly QqBotConfiguration _configuration = configuration;
+    private readonly QQBotConfiguration _configuration = configuration;
     private readonly ExtensionCredentialState _credential = credential;
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
 
-    public static async Task<ExtensionCredentialState> EnrollAsync(HttpClient http, QqBotConfiguration config, CancellationToken cancellationToken)
+    public static async Task<ExtensionCredentialState> EnrollAsync(HttpClient http, QQBotConfiguration config, CancellationToken cancellationToken)
     {
         using HttpResponseMessage capabilitiesResponse = await http.GetAsync(new Uri(config.PackingProofBaseUrl.TrimEnd('/') + "/api/extensions/v1/capabilities"), cancellationToken);
         using JsonDocument capabilities = await JsonDocument.ParseAsync(await capabilitiesResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);

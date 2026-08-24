@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace PackingProof.QqBot;
+namespace PackingProof.QQBot;
 
 public static partial class TrackingNumberParser
 {

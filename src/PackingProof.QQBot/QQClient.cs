@@ -6,13 +6,13 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace PackingProof.QqBot;
+namespace PackingProof.QQBot;
 
-public sealed class QqClient(HttpClient http, QqBotConfiguration configuration, QqBotSecrets secrets)
+public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, QQBotSecrets secrets)
 {
     private readonly HttpClient _http = http;
-    private readonly QqBotConfiguration _configuration = configuration;
-    private readonly QqBotSecrets _secrets = secrets;
+    private readonly QQBotConfiguration _configuration = configuration;
+    private readonly QQBotSecrets _secrets = secrets;
     private readonly SemaphoreSlim _tokenGate = new(1, 1);
     private string? _accessToken;
     private DateTimeOffset _accessTokenExpiresAt;

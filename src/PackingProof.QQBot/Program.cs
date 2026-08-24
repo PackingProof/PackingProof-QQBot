@@ -1,13 +1,13 @@
 using System.Collections.Concurrent;
 
-namespace PackingProof.QqBot;
+namespace PackingProof.QQBot;
 
 internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
         if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("此适配器只能在 Windows 上运行"); return 1; }
-        var store = new QqBotStateStore();
+        var store = new QQBotStateStore();
         try
         {
             return args.FirstOrDefault()?.ToLowerInvariant() switch
@@ -23,59 +23,59 @@ internal static class Program
         catch (Exception exception) { Console.Error.WriteLine(exception.Message); return 1; }
     }
 
-    private static async Task<int> ConfigureAsync(QqBotStateStore store)
+    private static async Task<int> ConfigureAsync(QQBotStateStore store)
     {
         string appId = Required("QQ AppID");
         string secret = Required("QQ AppSecret", hidden: true);
         string host = Optional("PackingProof 地址", "http://127.0.0.1:5280").TrimEnd('/');
         if (!Uri.TryCreate(host, UriKind.Absolute, out _)) throw new InvalidDataException("PackingProof 地址无效");
-        var config = new QqBotConfiguration { AppId = appId, PackingProofBaseUrl = host, ExtensionInstanceId = "qqbot-" + Guid.NewGuid().ToString("N") };
+        var config = new QQBotConfiguration { AppId = appId, PackingProofBaseUrl = host, ExtensionInstanceId = "qqbot-" + Guid.NewGuid().ToString("N") };
         using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(20) };
         Console.WriteLine("请在 PackingProof 弹出的窗口批准录像查询、下载和交付副本权限");
         ExtensionCredentialState credential = await PackingProofClient.EnrollAsync(http, config, CancellationToken.None);
-        store.Save(config, new QqBotSecrets { AppSecret = secret, ExtensionCredential = credential });
+        store.Save(config, new QQBotSecrets { AppSecret = secret, ExtensionCredential = credential });
         Console.WriteLine("配置已保存。接下来双击“启动机器人”，在目标群 @机器人发送一个单号；控制台会显示加群白名单所需的群 OpenID");
         return 0;
     }
 
-    private static int AllowGroup(QqBotStateStore store, string? group)
+    private static int AllowGroup(QQBotStateStore store, string? group)
     {
         group = string.IsNullOrWhiteSpace(group) ? Required("群 OpenID") : group.Trim();
-        QqBotConfiguration config = Config(store); QqBotSecrets secrets = Secrets(store);
+        QQBotConfiguration config = Config(store); QQBotSecrets secrets = Secrets(store);
         store.Save(config with { AllowedGroupOpenIds = config.AllowedGroupOpenIds.Append(group).Distinct(StringComparer.Ordinal).Order().ToArray() }, secrets);
         Console.WriteLine("已加入群白名单"); return 0;
     }
 
-    private static int ConfigureDeliverySettings(QqBotStateStore store)
+    private static int ConfigureDeliverySettings(QQBotStateStore store)
     {
-        QqBotConfiguration config = Config(store);
-        QqBotSecrets secrets = Secrets(store);
+        QQBotConfiguration config = Config(store);
+        QQBotSecrets secrets = Secrets(store);
         Console.WriteLine("视频发送设置：原片不超过限制时直接发送，超限时由 PackingProof 主机生成临时副本");
-        int size = ReadInt("单个视频最大大小（MB）", config.DeliveryMaxSizeMb, QqBotConfiguration.MinimumDeliveryMaxSizeMb, QqBotConfiguration.MaximumDeliveryMaxSizeMb);
+        int size = ReadInt("单个视频最大大小（MB）", config.DeliveryMaxSizeMb, QQBotConfiguration.MinimumDeliveryMaxSizeMb, QQBotConfiguration.MaximumDeliveryMaxSizeMb);
         Console.WriteLine("1. 优先保持原视频编码（推荐）\n2. 超限时转为 H.265，体积更小");
-        string selection = Optional("请输入 1 或 2", config.DeliveryProfile == QqBotConfiguration.H265TargetSizeProfile ? "2" : "1");
-        string profile = selection == "2" ? QqBotConfiguration.H265TargetSizeProfile : QqBotConfiguration.SourceCodecTargetSizeProfile;
+        string selection = Optional("请输入 1 或 2", config.DeliveryProfile == QQBotConfiguration.H265TargetSizeProfile ? "2" : "1");
+        string profile = selection == "2" ? QQBotConfiguration.H265TargetSizeProfile : QQBotConfiguration.SourceCodecTargetSizeProfile;
         store.Save((config with { DeliveryMaxSizeMb = size, DeliveryProfile = profile }).ValidateDeliverySettings(), secrets);
-        Console.WriteLine($"已保存：最大 {size} MB，{(profile == QqBotConfiguration.H265TargetSizeProfile ? "转 H.265" : "保持原视频编码")}");
+        Console.WriteLine($"已保存：最大 {size} MB，{(profile == QQBotConfiguration.H265TargetSizeProfile ? "转 H.265" : "保持原视频编码")}");
         return 0;
     }
 
-    private static async Task<int> RunAsync(QqBotStateStore store)
+    private static async Task<int> RunAsync(QQBotStateStore store)
     {
-        QqBotConfiguration config = Config(store); QqBotSecrets secrets = Secrets(store);
+        QQBotConfiguration config = Config(store); QQBotSecrets secrets = Secrets(store);
         if (secrets.ExtensionCredential == null) throw new InvalidOperationException("缺少扩展凭据，请重新运行 --configure");
         using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(20) };
         using var cancelled = new CancellationTokenSource();
         Console.CancelKeyPress += (_, eventArgs) => { eventArgs.Cancel = true; cancelled.Cancel(); };
-        var service = new QueryService(config, new PackingProofClient(http, config, secrets.ExtensionCredential), new QqClient(http, config, secrets));
+        var service = new QueryService(config, new PackingProofClient(http, config, secrets.ExtensionCredential), new QQClient(http, config, secrets));
         Console.WriteLine("QQ 机器人已启动，按 Ctrl+C 停止");
         await service.RunAsync(cancelled.Token);
         return 0;
     }
 
-    private static int Status(QqBotStateStore store) { QqBotConfiguration c = Config(store); Console.WriteLine($"PackingProof 地址：{c.PackingProofBaseUrl}\n允许群数量：{c.AllowedGroupOpenIds.Length}\n交付策略：{c.DeliveryProfile}\n交付上限：{c.DeliveryMaxSizeMb} MB\n状态目录：{store.DirectoryPath}"); return 0; }
-    private static QqBotConfiguration Config(QqBotStateStore store) => (store.LoadConfiguration() ?? throw new InvalidOperationException("尚未配置，请先运行 --configure")).ValidateDeliverySettings();
-    private static QqBotSecrets Secrets(QqBotStateStore store) => store.LoadSecrets() ?? throw new InvalidOperationException("缺少受保护密钥，请重新运行 --configure");
+    private static int Status(QQBotStateStore store) { QQBotConfiguration c = Config(store); Console.WriteLine($"PackingProof 地址：{c.PackingProofBaseUrl}\n允许群数量：{c.AllowedGroupOpenIds.Length}\n交付策略：{c.DeliveryProfile}\n交付上限：{c.DeliveryMaxSizeMb} MB\n状态目录：{store.DirectoryPath}"); return 0; }
+    private static QQBotConfiguration Config(QQBotStateStore store) => (store.LoadConfiguration() ?? throw new InvalidOperationException("尚未配置，请先运行 --configure")).ValidateDeliverySettings();
+    private static QQBotSecrets Secrets(QQBotStateStore store) => store.LoadSecrets() ?? throw new InvalidOperationException("缺少受保护密钥，请重新运行 --configure");
     private static string Optional(string label, string defaultValue) { Console.Write($"{label}（默认 {defaultValue}）："); return Console.ReadLine()?.Trim() is { Length: > 0 } value ? value : defaultValue; }
     private static int ReadInt(string label, int defaultValue, int minimum, int maximum)
     {
@@ -95,7 +95,7 @@ internal static class Program
     private static int Usage() { Console.WriteLine("请使用发布包中的“配置机器人”“启动机器人”“添加群白名单”和“视频发送设置”快捷方式"); return 0; }
 }
 
-internal sealed class QueryService(QqBotConfiguration config, PackingProofClient packingProof, QqClient qq)
+internal sealed class QueryService(QQBotConfiguration config, PackingProofClient packingProof, QQClient qq)
 {
     private readonly ConcurrentDictionary<string, byte> _handled = new(StringComparer.Ordinal);
     public Task RunAsync(CancellationToken cancellationToken) => qq.RunGatewayAsync(HandleAsync, cancellationToken);
@@ -144,7 +144,7 @@ internal sealed class QueryService(QqBotConfiguration config, PackingProofClient
 
                 string extension = Path.GetExtension(fileName);
                 if (string.IsNullOrWhiteSpace(extension)) extension = ".mp4";
-                string temporary = Path.Combine(Path.GetTempPath(), "PackingProof-QqBot-" + Guid.NewGuid().ToString("N") + extension);
+                string temporary = Path.Combine(Path.GetTempPath(), "PackingProof-QQBot-" + Guid.NewGuid().ToString("N") + extension);
                 try
                 {
                     using HttpResponseMessage download = delivery == null

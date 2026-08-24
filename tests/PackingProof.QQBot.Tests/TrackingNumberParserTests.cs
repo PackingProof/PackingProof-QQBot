@@ -1,6 +1,6 @@
-using PackingProof.QqBot;
+using PackingProof.QQBot;
 
-namespace PackingProof.QqBot.Tests;
+namespace PackingProof.QQBot.Tests;
 
 public sealed class TrackingNumberParserTests
 {
