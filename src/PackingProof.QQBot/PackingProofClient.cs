@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
@@ -15,15 +16,31 @@ public sealed class PackingProofClient(HttpClient http, QQBotConfiguration confi
 
     public static async Task<ExtensionCredentialState> EnrollAsync(HttpClient http, QQBotConfiguration config, CancellationToken cancellationToken)
     {
-        using HttpResponseMessage capabilitiesResponse = await http.GetAsync(new Uri(config.PackingProofBaseUrl.TrimEnd('/') + "/api/extensions/v1/capabilities"), cancellationToken);
-        using JsonDocument capabilities = await JsonDocument.ParseAsync(await capabilitiesResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        if (!capabilitiesResponse.IsSuccessStatusCode || !capabilities.RootElement.GetProperty("extensionApiEnabled").GetBoolean())
-            throw new InvalidOperationException("PackingProof 尚未启用扩展 API");
-        JsonElement features = capabilities.RootElement.GetProperty("features");
-        if (!features.GetProperty("recordingSearch").GetBoolean()
-            || !features.GetProperty("recordingDownload").GetBoolean()
-            || !features.GetProperty("recordingDelivery").GetBoolean())
-            throw new InvalidOperationException("当前 PackingProof 不支持机器人录像查询、下载或交付副本");
+        Uri capabilitiesUri = new(config.PackingProofBaseUrl.TrimEnd('/') + "/api/extensions/v1/capabilities");
+        HttpResponseMessage capabilitiesResponse;
+        try { capabilitiesResponse = await http.GetAsync(capabilitiesUri, cancellationToken); }
+        catch (HttpRequestException exception)
+        {
+            throw new InvalidOperationException($"无法连接 PackingProof（{config.PackingProofBaseUrl}），请确认地址和主程序的 Web 服务", exception);
+        }
+        using (capabilitiesResponse)
+        {
+            if (!capabilitiesResponse.IsSuccessStatusCode)
+                throw new InvalidOperationException(await ReadCapabilitiesFailureAsync(capabilitiesResponse, cancellationToken));
+
+            using JsonDocument capabilities = await JsonDocument.ParseAsync(await capabilitiesResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+            if (!capabilities.RootElement.TryGetProperty("extensionApiEnabled", out JsonElement extensionApiEnabled)
+                || !extensionApiEnabled.GetBoolean())
+                throw new InvalidOperationException("PackingProof 尚未启用扩展 API");
+            if (!capabilities.RootElement.TryGetProperty("features", out JsonElement features)
+                || !features.TryGetProperty("recordingSearch", out JsonElement recordingSearch)
+                || !recordingSearch.GetBoolean()
+                || !features.TryGetProperty("recordingDownload", out JsonElement recordingDownload)
+                || !recordingDownload.GetBoolean()
+                || !features.TryGetProperty("recordingDelivery", out JsonElement recordingDelivery)
+                || !recordingDelivery.GetBoolean())
+                throw new InvalidOperationException("当前 PackingProof 不支持机器人录像查询、下载或交付副本");
+        }
 
         var request = new
         {
@@ -124,6 +141,24 @@ public sealed class PackingProofClient(HttpClient http, QQBotConfiguration confi
     }
 
     private static string ReadError(JsonDocument body, string fallback) => body.RootElement.TryGetProperty("error", out JsonElement error) ? error.GetString() ?? fallback : fallback;
+
+    private static async Task<string> ReadCapabilitiesFailureAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return "目标地址未提供扩展 API，请确认 PackingProof 地址和主程序版本";
+
+        string detail = "";
+        try
+        {
+            using JsonDocument body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+            detail = ReadError(body, "");
+        }
+        catch (JsonException) { }
+
+        return string.IsNullOrWhiteSpace(detail)
+            ? $"读取 PackingProof 扩展能力失败（HTTP {(int)response.StatusCode}）"
+            : $"读取 PackingProof 扩展能力失败（HTTP {(int)response.StatusCode}：{detail}）";
+    }
 }
 
 public sealed class RecordingQuery
