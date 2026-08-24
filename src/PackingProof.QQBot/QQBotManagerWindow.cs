@@ -73,11 +73,15 @@ internal sealed class QQBotManagerWindow : Window
     private static WpfStackPanel Row(params UIElement[] children)
     {
         var panel = new WpfStackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
-        foreach (UIElement child in children) { child.Margin = new Thickness(0, 0, 8, 0); panel.Children.Add(child); }
+        foreach (UIElement child in children)
+        {
+            if (child is FrameworkElement element) element.Margin = new Thickness(0, 0, 8, 0);
+            panel.Children.Add(child);
+        }
         return panel;
     }
 
-    private static WpfButton Button(string text, RoutedEventHandler handler) => new() { Content = text, Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(0, 0, 8, 0), }.Also(button => button.Click += handler);
+    private static WpfButton Button(string text, RoutedEventHandler handler) => new WpfButton { Content = text, Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(0, 0, 8, 0), }.Also(button => button.Click += handler);
 
     private void Load()
     {

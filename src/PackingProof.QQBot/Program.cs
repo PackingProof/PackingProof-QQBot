@@ -147,7 +147,7 @@ internal static class Program
 
     private static int ShowWindow(QQBotStateStore store)
     {
-        var application = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
+        var application = new System.Windows.Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
         application.Run(new QQBotManagerWindow(store));
         return 0;
     }
