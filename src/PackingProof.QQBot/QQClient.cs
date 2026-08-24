@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Net.WebSockets;
@@ -36,7 +37,7 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
             using JsonDocument body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
             EnsureSuccess(response, body, "获取 QQ Access Token 失败");
             _accessToken = body.RootElement.GetProperty("access_token").GetString() ?? throw new InvalidDataException("QQ Access Token 为空");
-            _accessTokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(body.RootElement.GetProperty("expires_in").GetInt32());
+            _accessTokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(ReadRequiredInt32(body.RootElement.GetProperty("expires_in"), "QQ Access Token 过期时间"));
             return _accessToken;
         }
         finally { _tokenGate.Release(); }
@@ -63,9 +64,9 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
         using JsonDocument preparationBody = await JsonDocument.ParseAsync(await prepared.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         EnsureSuccess(prepared, preparationBody, "准备 QQ 录像上传失败");
         string uploadId = preparationBody.RootElement.GetProperty("upload_id").GetString() ?? throw new InvalidDataException("QQ 上传任务为空");
-        foreach (JsonElement part in preparationBody.RootElement.GetProperty("parts").EnumerateArray().OrderBy(value => value.GetProperty("index").GetInt32()))
+        foreach (JsonElement part in preparationBody.RootElement.GetProperty("parts").EnumerateArray().OrderBy(value => ReadRequiredInt32(value.GetProperty("index"), "QQ 上传分片序号")))
         {
-            int index = part.GetProperty("index").GetInt32();
+            int index = ReadRequiredInt32(part.GetProperty("index"), "QQ 上传分片序号");
             int size = checked((int)long.Parse(part.GetProperty("block_size").GetString()!));
             string url = part.GetProperty("presigned_url").GetString() ?? throw new InvalidDataException("QQ 分片地址为空");
             byte[] bytes = await ReadPartAsync(filePath, (long)index * size, size, cancellationToken);
@@ -100,9 +101,9 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
         using var socket = new ClientWebSocket();
         await socket.ConnectAsync(new Uri(await GetGatewayAsync(cancellationToken)), cancellationToken);
         using JsonDocument hello = JsonDocument.Parse(await ReceiveAsync(socket, cancellationToken));
-        if (hello.RootElement.GetProperty("op").GetInt32() != 10) throw new InvalidDataException("QQ 网关未返回 Hello");
+        if (ReadRequiredInt32(hello.RootElement.GetProperty("op"), "QQ 网关操作码") != 10) throw new InvalidDataException("QQ 网关未返回 Hello");
         await SendGatewayAsync(socket, new { op = 2, d = new { token = "QQBot " + await GetAccessTokenAsync(cancellationToken), intents = 1 << 25, shard = new[] { 0, 1 }, properties = new { os = "windows" } } }, cancellationToken);
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(hello.RootElement.GetProperty("d").GetProperty("heartbeat_interval").GetInt32()));
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(ReadRequiredInt32(hello.RootElement.GetProperty("d").GetProperty("heartbeat_interval"), "QQ 网关心跳间隔")));
         using var heartbeatCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         Task heartbeat = Task.Run(async () => { while (await timer.WaitForNextTickAsync(heartbeatCancellation.Token)) await SendGatewayAsync(socket, new { op = 1, d = (object?)null }, heartbeatCancellation.Token); });
         try
@@ -110,7 +111,7 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
             while (socket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
             {
                 using JsonDocument payload = JsonDocument.Parse(await ReceiveAsync(socket, cancellationToken));
-                int op = payload.RootElement.GetProperty("op").GetInt32();
+                int op = ReadRequiredInt32(payload.RootElement.GetProperty("op"), "QQ 网关操作码");
                 if (op is 7 or 9) throw new InvalidOperationException("QQ 网关要求重新连接");
                 if (op != 0 || !payload.RootElement.TryGetProperty("t", out JsonElement type) || type.GetString() is not ("GROUP_AT_MESSAGE_CREATE" or "GROUP_MESSAGE_CREATE")) continue;
                 GroupMessage? message = payload.RootElement.GetProperty("d").Deserialize<GroupMessage>();
@@ -145,6 +146,18 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
         if (response.IsSuccessStatusCode) return;
         string detail = body.RootElement.TryGetProperty("message", out JsonElement message) ? message.GetString() ?? fallback : fallback;
         throw new InvalidOperationException($"{fallback}（HTTP {(int)response.StatusCode}：{detail}）");
+    }
+
+    internal static int ReadRequiredInt32(JsonElement element, string fieldName)
+    {
+        if (element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out int number))
+            return number;
+        if (element.ValueKind == JsonValueKind.String
+            && int.TryParse(element.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out number))
+        {
+            return number;
+        }
+        throw new InvalidDataException($"{fieldName}格式无效");
     }
 
     private static async Task<byte[]> ReadPartAsync(string path, long offset, int capacity, CancellationToken cancellationToken)
