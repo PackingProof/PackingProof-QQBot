@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 
 namespace PackingProof.QQBot;
 
@@ -7,6 +8,9 @@ internal static class Program
     private static async Task<int> Main(string[] args)
     {
         if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("此适配器只能在 Windows 上运行"); return 1; }
+        Console.InputEncoding = Encoding.UTF8;
+        Console.OutputEncoding = Encoding.UTF8;
+        Console.Error.OutputEncoding = Encoding.UTF8;
         var store = new QQBotStateStore();
         try
         {
