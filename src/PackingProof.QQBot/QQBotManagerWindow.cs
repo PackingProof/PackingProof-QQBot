@@ -3,9 +3,12 @@ using WpfBorder = System.Windows.Controls.Border;
 using WpfButton = System.Windows.Controls.Button;
 using WpfComboBox = System.Windows.Controls.ComboBox;
 using WpfControl = System.Windows.Controls.Control;
+using WpfColumnDefinition = System.Windows.Controls.ColumnDefinition;
+using WpfGrid = System.Windows.Controls.Grid;
 using WpfListBox = System.Windows.Controls.ListBox;
 using WpfPanel = System.Windows.Controls.Panel;
 using WpfPasswordBox = System.Windows.Controls.PasswordBox;
+using WpfRowDefinition = System.Windows.Controls.RowDefinition;
 using WpfScrollViewer = System.Windows.Controls.ScrollViewer;
 using WpfSeparator = System.Windows.Controls.Separator;
 using WpfStackPanel = System.Windows.Controls.StackPanel;
@@ -69,35 +72,52 @@ internal sealed class QQBotManagerWindow : Window
         controls.Children.Add(Row(PrimaryButton("启动机器人", StartAsync), Button("停止机器人", Stop), _startupButton));
         panel.Children.Add(new WpfBorder { Background = Brush(239, 246, 255), BorderBrush = Brush(191, 219, 254), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(14, 10, 14, 10), Child = controls, Margin = new Thickness(0, 0, 0, 14) });
 
-        var connection = new WpfStackPanel();
-        AddField(connection, "QQ AppID", _appId);
-        AddField(connection, "QQ AppSecret", _appSecret);
-        AddField(connection, "PackingProof 地址", _host);
-        connection.Children.Add(Row(PrimaryButton("保存并授权", SaveAsync), Button("测试连接", TestHostAsync), Button("搜索局域网主机", SearchHostsAsync)));
+        var connection = FormGrid(7);
+        AddField(connection, 0, "QQ AppID", _appId);
+        AddField(connection, 1, "QQ AppSecret", _appSecret);
+        AddField(connection, 2, "PackingProof 地址", _host);
+        WpfStackPanel authorizationActions = Row(PrimaryButton("保存并授权", SaveAsync), Button("测试连接", TestHostAsync), Button("搜索局域网主机", SearchHostsAsync));
+        WpfGrid.SetRow(authorizationActions, 3);
+        WpfGrid.SetColumn(authorizationActions, 1);
+        connection.Children.Add(authorizationActions);
         _hostInfo.TextWrapping = TextWrapping.Wrap;
         _hostInfo.Foreground = Brush(71, 85, 105);
-        _hostInfo.Margin = new Thickness(0, 12, 0, 0);
+        _hostInfo.Margin = new Thickness(0, 10, 0, 4);
+        WpfGrid.SetRow(_hostInfo, 4);
+        WpfGrid.SetColumn(_hostInfo, 1);
         connection.Children.Add(_hostInfo);
         _foundHosts.MaxHeight = 110;
         _foundHosts.Visibility = Visibility.Collapsed;
-        _foundHosts.Margin = new Thickness(0, 10, 0, 0);
+        _foundHosts.Margin = new Thickness(0, 6, 0, 0);
+        WpfGrid.SetRow(_foundHosts, 5);
+        WpfGrid.SetColumn(_foundHosts, 1);
         connection.Children.Add(_foundHosts);
         _useSelectedHostButton = Button("使用选中主机", UseSelectedHost);
         _useSelectedHostButton.Visibility = Visibility.Collapsed;
-        connection.Children.Add(Row(_useSelectedHostButton));
+        WpfStackPanel selectedHostActions = Row(_useSelectedHostButton);
+        WpfGrid.SetRow(selectedHostActions, 6);
+        WpfGrid.SetColumn(selectedHostActions, 1);
+        connection.Children.Add(selectedHostActions);
         panel.Children.Add(Card("连接与授权", connection));
 
-        var groups = new WpfStackPanel();
+        var groups = FormGrid(2);
         _groups.MaxHeight = 100;
         _groups.Margin = new Thickness(0, 0, 0, 8);
+        WpfGrid.SetColumnSpan(_groups, 2);
         groups.Children.Add(_groups);
         _groupOpenId.MinWidth = 330;
         _groupOpenId.Height = 32;
         _groupOpenId.VerticalContentAlignment = VerticalAlignment.Center;
-        groups.Children.Add(Row(_groupOpenId, PrimaryButton("添加到白名单", AddGroup), Button("删除选中", RemoveGroup)));
+        var groupLabel = Label("群 OpenID");
+        WpfGrid.SetRow(groupLabel, 1);
+        groups.Children.Add(groupLabel);
+        WpfStackPanel groupActions = Row(_groupOpenId, PrimaryButton("添加到白名单", AddGroup), Button("删除选中", RemoveGroup));
+        WpfGrid.SetRow(groupActions, 1);
+        WpfGrid.SetColumn(groupActions, 1);
+        groups.Children.Add(groupActions);
         panel.Children.Add(Card("QQ 群白名单", groups));
 
-        var delivery = new WpfStackPanel();
+        var delivery = FormGrid(1);
         _profile.Items.Add("保持原编码并降低码率");
         _profile.Items.Add("转为 H.265");
         _size.Width = 68;
@@ -106,7 +126,11 @@ internal sealed class QQBotManagerWindow : Window
         _profile.MinWidth = 220;
         _profile.Height = 32;
         _profile.VerticalContentAlignment = VerticalAlignment.Center;
-        delivery.Children.Add(Row(new WpfTextBlock { Text = "单个视频上限（MB）", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) }, _size, _profile, Button("保存视频设置", SaveDelivery)));
+        var deliveryLabel = Label("视频上限（MB）");
+        delivery.Children.Add(deliveryLabel);
+        WpfStackPanel deliveryActions = Row(_size, _profile, Button("保存视频设置", SaveDelivery));
+        WpfGrid.SetColumn(deliveryActions, 1);
+        delivery.Children.Add(deliveryActions);
         panel.Children.Add(Card("视频发送", delivery));
 
         _logs.MaxHeight = 160;
@@ -124,14 +148,36 @@ internal sealed class QQBotManagerWindow : Window
         return new WpfBorder { Background = System.Windows.Media.Brushes.White, BorderBrush = Brush(226, 232, 240), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Child = panel, Margin = new Thickness(0, 0, 0, 14) };
     }
 
-    private static void AddField(WpfPanel panel, string label, WpfControl control)
+    private static WpfGrid FormGrid(int rowCount)
     {
-        panel.Children.Add(new WpfTextBlock { Text = label, FontWeight = FontWeights.SemiBold, Foreground = Brush(51, 65, 85), Margin = new Thickness(0, 0, 0, 3) });
-        control.MinWidth = 420;
+        var grid = new WpfGrid();
+        grid.ColumnDefinitions.Add(new WpfColumnDefinition { Width = new GridLength(150) });
+        grid.ColumnDefinitions.Add(new WpfColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        for (int row = 0; row < rowCount; row++) grid.RowDefinitions.Add(new WpfRowDefinition { Height = GridLength.Auto });
+        return grid;
+    }
+
+    private static WpfTextBlock Label(string text) => new()
+    {
+        Text = text,
+        FontWeight = FontWeights.SemiBold,
+        Foreground = Brush(51, 65, 85),
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(0, 0, 18, 8)
+    };
+
+    private static void AddField(WpfGrid grid, int row, string label, WpfControl control)
+    {
+        WpfTextBlock fieldLabel = Label(label);
+        WpfGrid.SetRow(fieldLabel, row);
+        grid.Children.Add(fieldLabel);
+        control.MinWidth = 0;
         control.Height = 32;
         control.VerticalContentAlignment = VerticalAlignment.Center;
-        control.Margin = new Thickness(0, 0, 0, 10);
-        panel.Children.Add(control);
+        control.Margin = new Thickness(0, 0, 0, 8);
+        WpfGrid.SetRow(control, row);
+        WpfGrid.SetColumn(control, 1);
+        grid.Children.Add(control);
     }
 
     private static WpfStackPanel Row(params UIElement[] children)
