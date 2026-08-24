@@ -5,24 +5,24 @@ namespace PackingProof.QQBot;
 internal static class Program
 {
     [STAThread]
-    private static Task<int> Main(string[] args)
+    private static int Main(string[] args)
     {
-        if (!OperatingSystem.IsWindows()) return Task.FromResult(1);
+        if (!OperatingSystem.IsWindows()) return 1;
         var store = new QQBotStateStore();
         try
         {
-            return Task.FromResult(args.FirstOrDefault()?.ToLowerInvariant() switch
+            return args.FirstOrDefault()?.ToLowerInvariant() switch
             {
                 "--background" => RunBackground(store),
                 "--run" => RunBackground(store),
                 "--status" => Status(store),
                 _ => RunManager(store)
-            });
+            };
         }
         catch (Exception exception)
         {
             System.Windows.MessageBox.Show(exception.Message, "PackingProof QQBot", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
-            return Task.FromResult(1);
+            return 1;
         }
     }
 
