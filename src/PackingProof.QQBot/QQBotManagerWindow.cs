@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Diagnostics;
 using WpfBorder = System.Windows.Controls.Border;
 using WpfButton = System.Windows.Controls.Button;
 using WpfComboBox = System.Windows.Controls.ComboBox;
@@ -69,7 +70,7 @@ internal sealed class QQBotManagerWindow : Window
         var controls = new WpfStackPanel();
         controls.Children.Add(_status);
         _startupButton = Button("", ToggleStartup);
-        controls.Children.Add(Row(PrimaryButton("启动机器人", StartAsync), Button("停止机器人", Stop), _startupButton));
+        controls.Children.Add(Row(PrimaryButton("启动机器人", StartAsync), Button("停止机器人", Stop), _startupButton, Button("使用教程", OpenUserGuide)));
         panel.Children.Add(new WpfBorder { Background = Brush(239, 246, 255), BorderBrush = Brush(191, 219, 254), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(14, 10, 14, 10), Child = controls, Margin = new Thickness(0, 0, 0, 14) });
 
         var connection = FormGrid(7);
@@ -307,6 +308,13 @@ internal sealed class QQBotManagerWindow : Window
     }
 
     private void Stop(object sender, RoutedEventArgs eventArgs) { _runtime.Stop(); SetStatus("正在停止机器人"); }
+    private void OpenUserGuide(object sender, RoutedEventArgs eventArgs)
+    {
+        string guidePath = Path.Combine(AppContext.BaseDirectory, "使用说明.md");
+        if (!File.Exists(guidePath)) { SetStatus("未找到《使用说明》，请确认发布包文件完整"); return; }
+        try { Process.Start(new ProcessStartInfo(guidePath) { UseShellExecute = true }); }
+        catch (Exception exception) { SetStatus("打开使用教程失败：" + exception.Message); }
+    }
     private void ToggleStartup(object sender, RoutedEventArgs eventArgs)
     {
         QQBotConfiguration config = RequireConfig();
