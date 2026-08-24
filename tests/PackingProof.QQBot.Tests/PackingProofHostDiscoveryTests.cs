@@ -98,6 +98,7 @@ public sealed class PackingProofHostDiscoveryTests
 
             Assert.Equal(NodeId, resolved.PackingProofNodeId);
             Assert.Equal(NodeId, store.LoadConfiguration()!.PackingProofNodeId);
+            Assert.Equal("Test host", store.LoadConfiguration()!.PackingProofNodeName);
         }
         finally
         {

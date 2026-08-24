@@ -45,16 +45,24 @@ internal static class Program
         using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(20) };
         PackingProofHostInfo? packingProofHost = await new PackingProofHostDiscovery(http).ProbeAsync(host, CancellationToken.None);
         if (packingProofHost == null) throw new InvalidOperationException("无法确认 PackingProof 主机，请检查地址、局域网连接和主程序版本");
-        var config = new QQBotConfiguration
+        QQBotConfiguration config = CreateConfiguration(store.LoadConfiguration(), appId, packingProofHost);
+        ExtensionCredentialState credential = await PackingProofClient.EnrollAsync(http, config, cancellationToken);
+        store.Save(config, new QQBotSecrets { AppSecret = secret, ExtensionCredential = credential });
+    }
+
+    internal static QQBotConfiguration CreateConfiguration(QQBotConfiguration? existing, string appId, PackingProofHostInfo packingProofHost) =>
+        new QQBotConfiguration
         {
             AppId = appId,
             PackingProofBaseUrl = packingProofHost.BaseUrl,
             PackingProofNodeId = packingProofHost.NodeId,
-            ExtensionInstanceId = "qqbot-" + Guid.NewGuid().ToString("N")
-        };
-        ExtensionCredentialState credential = await PackingProofClient.EnrollAsync(http, config, cancellationToken);
-        store.Save(config, new QQBotSecrets { AppSecret = secret, ExtensionCredential = credential });
-    }
+            PackingProofNodeName = packingProofHost.NodeName,
+            ExtensionInstanceId = string.IsNullOrWhiteSpace(existing?.ExtensionInstanceId) ? "qqbot-" + Guid.NewGuid().ToString("N") : existing.ExtensionInstanceId,
+            AllowedGroupOpenIds = existing?.AllowedGroupOpenIds ?? [],
+            DeliveryMaxSizeMb = existing?.DeliveryMaxSizeMb ?? QQBotConfiguration.DefaultDeliveryMaxSizeMb,
+            DeliveryProfile = existing?.DeliveryProfile ?? QQBotConfiguration.SourceCodecTargetSizeProfile,
+            StartWithWindows = existing?.StartWithWindows ?? false
+        }.ValidateDeliverySettings();
 
     private static async Task<int> StartAsync(QQBotStateStore store)
     {
@@ -117,7 +125,7 @@ internal static class Program
         if (!string.IsNullOrWhiteSpace(config.PackingProofNodeId)
             && !string.Equals(config.PackingProofNodeId, current.NodeId, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("当前地址不是已授权的 PackingProof 主机，为保护授权凭据未自动切换");
-        QQBotConfiguration resolved = config with { PackingProofBaseUrl = current.BaseUrl, PackingProofNodeId = current.NodeId };
+        QQBotConfiguration resolved = config with { PackingProofBaseUrl = current.BaseUrl, PackingProofNodeId = current.NodeId, PackingProofNodeName = current.NodeName };
         if (resolved != config) store.Save(resolved, secrets);
         return resolved;
     }
