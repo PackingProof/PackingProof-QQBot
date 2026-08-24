@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -48,6 +49,39 @@ public sealed class QqClient(HttpClient http, QqBotConfiguration configuration, 
         using HttpResponseMessage response = await SendAsync(HttpMethod.Post, "/v2/groups/" + Uri.EscapeDataString(groupOpenId) + "/messages", body, cancellationToken);
         using JsonDocument payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         EnsureSuccess(response, payload, "发送 QQ 群消息失败");
+    }
+
+    public async Task SendRecordingAsync(string groupOpenId, string filePath, string fileName, string videoCodec, string messageId, int sequence, CancellationToken cancellationToken)
+    {
+        var file = new FileInfo(filePath);
+        if (!file.Exists) throw new FileNotFoundException("待发送录像不存在", filePath);
+        if (file.Length > 200L * 1024 * 1024) throw new InvalidOperationException("录像超过 QQ 单文件 200 MB 上限");
+        int fileType = string.Equals(videoCodec, "h264", StringComparison.OrdinalIgnoreCase) && file.Length <= 30L * 1024 * 1024 ? 2 : 4;
+        FileHashes hashes = await GetHashesAsync(filePath, cancellationToken);
+        string root = "/v2/groups/" + Uri.EscapeDataString(groupOpenId);
+        using HttpResponseMessage prepared = await SendAsync(HttpMethod.Post, root + "/upload_prepare", new { file_type = fileType, file_size = file.Length.ToString(), file_name = fileName, md5 = hashes.Md5, sha1 = hashes.Sha1, md5_10m = hashes.FirstTenMegabytesMd5 }, cancellationToken);
+        using JsonDocument preparationBody = await JsonDocument.ParseAsync(await prepared.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        EnsureSuccess(prepared, preparationBody, "准备 QQ 录像上传失败");
+        string uploadId = preparationBody.RootElement.GetProperty("upload_id").GetString() ?? throw new InvalidDataException("QQ 上传任务为空");
+        foreach (JsonElement part in preparationBody.RootElement.GetProperty("parts").EnumerateArray().OrderBy(value => value.GetProperty("index").GetInt32()))
+        {
+            int index = part.GetProperty("index").GetInt32();
+            int size = checked((int)long.Parse(part.GetProperty("block_size").GetString()!));
+            string url = part.GetProperty("presigned_url").GetString() ?? throw new InvalidDataException("QQ 分片地址为空");
+            byte[] bytes = await ReadPartAsync(filePath, (long)index * size, size, cancellationToken);
+            using (var put = new HttpRequestMessage(HttpMethod.Put, url) { Content = new ByteArrayContent(bytes) })
+            using (HttpResponseMessage uploaded = await _http.SendAsync(put, cancellationToken))
+                if (!uploaded.IsSuccessStatusCode) throw new InvalidOperationException($"上传 QQ 录像分片失败（HTTP {(int)uploaded.StatusCode}）");
+            using HttpResponseMessage finished = await SendAsync(HttpMethod.Post, root + "/upload_part_finish", new { upload_id = uploadId, part_index = index, block_size = bytes.Length.ToString(), md5 = Convert.ToHexString(MD5.HashData(bytes)).ToLowerInvariant() }, cancellationToken);
+            if (!finished.IsSuccessStatusCode) throw new InvalidOperationException("确认 QQ 录像分片失败");
+        }
+        using HttpResponseMessage merged = await SendAsync(HttpMethod.Post, root + "/files", new { file_type = fileType, file_name = fileName, srv_send_msg = false, upload_id = uploadId }, cancellationToken);
+        using JsonDocument mergedBody = await JsonDocument.ParseAsync(await merged.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        EnsureSuccess(merged, mergedBody, "合并 QQ 录像上传失败");
+        string fileInfo = mergedBody.RootElement.GetProperty("file_info").GetString() ?? throw new InvalidDataException("QQ 文件信息为空");
+        using HttpResponseMessage sent = await SendAsync(HttpMethod.Post, root + "/messages", new { msg_type = 7, msg_id = messageId, msg_seq = sequence, media = new { file_info = fileInfo } }, cancellationToken);
+        using JsonDocument sentBody = await JsonDocument.ParseAsync(await sent.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        EnsureSuccess(sent, sentBody, "发送 QQ 录像失败");
     }
 
     public async Task RunGatewayAsync(Func<GroupMessage, CancellationToken, Task> handler, CancellationToken cancellationToken)
@@ -112,6 +146,34 @@ public sealed class QqClient(HttpClient http, QqBotConfiguration configuration, 
         string detail = body.RootElement.TryGetProperty("message", out JsonElement message) ? message.GetString() ?? fallback : fallback;
         throw new InvalidOperationException($"{fallback}（HTTP {(int)response.StatusCode}：{detail}）");
     }
+
+    private static async Task<byte[]> ReadPartAsync(string path, long offset, int capacity, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[capacity];
+        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, capacity, FileOptions.Asynchronous);
+        input.Position = offset;
+        int read = 0;
+        while (read < capacity)
+        {
+            int count = await input.ReadAsync(buffer.AsMemory(read, capacity - read), cancellationToken);
+            if (count == 0) break;
+            read += count;
+        }
+        return read == capacity ? buffer : buffer[..read];
+    }
+
+    private static async Task<FileHashes> GetHashesAsync(string path, CancellationToken cancellationToken)
+    {
+        using IncrementalHash md5 = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
+        using IncrementalHash sha1 = IncrementalHash.CreateHash(HashAlgorithmName.SHA1);
+        using IncrementalHash first = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
+        var buffer = new byte[1024 * 1024]; long remaining = 10_002_432;
+        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, buffer.Length, FileOptions.Asynchronous);
+        while (true) { int count = await input.ReadAsync(buffer, cancellationToken); if (count == 0) break; md5.AppendData(buffer, 0, count); sha1.AppendData(buffer, 0, count); int take = (int)Math.Min(remaining, count); if (take > 0) first.AppendData(buffer, 0, take); remaining -= take; }
+        return new FileHashes(Convert.ToHexString(md5.GetHashAndReset()).ToLowerInvariant(), Convert.ToHexString(sha1.GetHashAndReset()).ToLowerInvariant(), Convert.ToHexString(first.GetHashAndReset()).ToLowerInvariant());
+    }
+
+    private sealed record FileHashes(string Md5, string Sha1, string FirstTenMegabytesMd5);
 }
 
 public sealed class GroupMessage

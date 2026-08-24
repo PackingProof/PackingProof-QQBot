@@ -85,7 +85,23 @@ internal sealed class QueryService(QqBotConfiguration config, PackingProofClient
         await qq.SendTextAsync(message.GroupOpenid, $"正在查询单号 {number} 的录像", message.Id, 1, cancellationToken);
         RecordingQuery query = await packingProof.CreateQueryAsync(number, cancellationToken);
         while (query.Status is "queued" or "searching" or "preparing") { await Task.Delay(1000, cancellationToken); query = await packingProof.GetQueryAsync(query.QueryId, cancellationToken); }
-        string reply = query.Status == "not_found" ? $"未找到单号 {number} 的精确匹配录像" : query.Status is "ready" or "completed" ? $"已找到 {query.Recordings.Count(r => r.Status == "ready")} 段录像，正在准备转发" : string.IsNullOrWhiteSpace(query.Message) ? "录像查询失败" : query.Message;
-        await qq.SendTextAsync(message.GroupOpenid, reply, message.Id, 2, cancellationToken);
+        if (query.Status == "not_found") { await qq.SendTextAsync(message.GroupOpenid, $"未找到单号 {number} 的精确匹配录像", message.Id, 2, cancellationToken); return; }
+        if (query.Status is not ("ready" or "completed")) { await qq.SendTextAsync(message.GroupOpenid, string.IsNullOrWhiteSpace(query.Message) ? "录像查询失败" : query.Message, message.Id, 2, cancellationToken); return; }
+        int sequence = 2;
+        foreach (Recording recording in query.Recordings.Where(item => item.Status == "ready" && item.DownloadUrl != null).Take(3))
+        {
+            if (recording.FileSizeBytes > 200L * 1024 * 1024) { await qq.SendTextAsync(message.GroupOpenid, "录像超过 QQ 单文件 200 MB 上限，暂不支持发送", message.Id, sequence++, cancellationToken); continue; }
+            string temporary = Path.Combine(Path.GetTempPath(), "PackingProof-QqBot-" + Guid.NewGuid().ToString("N") + ".mp4");
+            try
+            {
+                using HttpResponseMessage download = await packingProof.DownloadAsync(query.QueryId, recording.RecordingId, cancellationToken);
+                if (!download.IsSuccessStatusCode) throw new InvalidOperationException("下载录像失败");
+                await using Stream source = await download.Content.ReadAsStreamAsync(cancellationToken);
+                await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1024 * 1024, FileOptions.Asynchronous)) await source.CopyToAsync(output, cancellationToken);
+                await qq.SendRecordingAsync(message.GroupOpenid, temporary, number + ".mp4", recording.VideoCodec, message.Id, sequence++, cancellationToken);
+            }
+            catch (Exception exception) { Console.Error.WriteLine($"转发录像失败：{exception.Message}"); await qq.SendTextAsync(message.GroupOpenid, "录像已找到，但转发到 QQ 失败，请稍后重试", message.Id, sequence++, cancellationToken); }
+            finally { try { File.Delete(temporary); } catch { } }
+        }
     }
 }
