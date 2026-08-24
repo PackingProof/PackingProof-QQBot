@@ -46,13 +46,14 @@ internal sealed class PackingProofHostDiscovery(HttpClient http)
     public async Task<PackingProofHostInfo?> ProbeAsync(string baseUrl, CancellationToken cancellationToken)
     {
         if (!TryNormalizeBaseUrl(baseUrl, out Uri? uri)) return null;
+        Uri verifiedUri = uri!;
         try
         {
-            using HttpResponseMessage response = await _http.GetAsync(new Uri(uri!, "/api/node-info"), cancellationToken);
+            using HttpResponseMessage response = await _http.GetAsync(new Uri(verifiedUri, "/api/node-info"), cancellationToken);
             if (!response.IsSuccessStatusCode) return null;
             PackingProofHostInfo? node = await response.Content.ReadFromJsonAsync<PackingProofHostInfo>(cancellationToken: cancellationToken);
             if (node is not { IsValidHost: true } verified) return null;
-            return verified with { BaseUrl = new UriBuilder(uri.Scheme, uri.Host, verified.HttpPort).Uri.AbsoluteUri.TrimEnd('/') };
+            return verified with { BaseUrl = new UriBuilder(verifiedUri.Scheme, verifiedUri.Host, verified.HttpPort).Uri.AbsoluteUri.TrimEnd('/') };
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException) { return null; }
     }
