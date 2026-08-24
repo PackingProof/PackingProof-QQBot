@@ -113,15 +113,26 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
                 using JsonDocument payload = JsonDocument.Parse(await ReceiveAsync(socket, cancellationToken));
                 int op = ReadRequiredInt32(payload.RootElement.GetProperty("op"), "QQ 网关操作码");
                 if (op is 7 or 9) throw new InvalidOperationException("QQ 网关要求重新连接");
-                if (op == 0 && payload.RootElement.TryGetProperty("t", out JsonElement readyType)
-                    && string.Equals(readyType.GetString(), "READY", StringComparison.Ordinal))
+                if (op != 0 || !payload.RootElement.TryGetProperty("t", out JsonElement type)) continue;
+                string eventType = type.GetString() ?? "";
+                if (string.Equals(eventType, "READY", StringComparison.Ordinal))
                 {
                     Console.WriteLine("QQ 网关已连接，机器人在线");
                     continue;
                 }
-                if (op != 0 || !payload.RootElement.TryGetProperty("t", out JsonElement type) || type.GetString() is not ("GROUP_AT_MESSAGE_CREATE" or "GROUP_MESSAGE_CREATE")) continue;
+                if (eventType is not ("GROUP_AT_MESSAGE_CREATE" or "GROUP_MESSAGE_CREATE"))
+                {
+                    Console.WriteLine($"收到 QQ 事件：{eventType}");
+                    continue;
+                }
+                Console.WriteLine("收到 QQ 群消息，正在读取群 OpenID");
                 GroupMessage? message = payload.RootElement.GetProperty("d").Deserialize<GroupMessage>();
-                if (message != null) _ = Task.Run(() => handler(message, cancellationToken), CancellationToken.None);
+                if (message == null) continue;
+                _ = Task.Run(async () =>
+                {
+                    try { await handler(message, cancellationToken); }
+                    catch (Exception exception) { Console.Error.WriteLine($"处理 QQ 群消息失败：{exception.Message}"); }
+                }, CancellationToken.None);
             }
         }
         finally { heartbeatCancellation.Cancel(); try { await heartbeat; } catch (OperationCanceledException) { } }
