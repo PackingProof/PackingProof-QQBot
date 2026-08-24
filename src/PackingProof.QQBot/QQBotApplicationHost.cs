@@ -11,7 +11,7 @@ internal sealed class QQBotApplicationHost : IDisposable
     private System.Windows.Forms.NotifyIcon? _trayIcon;
     private RegisteredWaitHandle? _activationRegistration;
     private QQBotManagerWindow? _window;
-    private Application? _application;
+    private System.Windows.Application? _application;
 
     public QQBotApplicationHost(QQBotStateStore store, bool startInBackground, EventWaitHandle? activationEvent)
     {
@@ -23,7 +23,7 @@ internal sealed class QQBotApplicationHost : IDisposable
 
     public int Run()
     {
-        _application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+        _application = new System.Windows.Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         _window = new QQBotManagerWindow(_store, _runtime);
         _window.Closing += OnWindowClosing;
         if (_activationEvent != null)
