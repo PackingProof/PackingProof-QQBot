@@ -38,7 +38,7 @@ internal static class Program
         Console.WriteLine("请在 PackingProof 弹出的窗口批准录像查询、下载和交付副本权限");
         ExtensionCredentialState credential = await PackingProofClient.EnrollAsync(http, config, CancellationToken.None);
         store.Save(config, new QQBotSecrets { AppSecret = secret, ExtensionCredential = credential });
-        Console.WriteLine("配置已保存。接下来双击“启动机器人”，在目标群 @机器人发送一个单号；控制台会显示加群白名单所需的群 OpenID");
+        Console.WriteLine("配置已保存。接下来双击“启动机器人”，在私聊中向机器人发送一个单号；如已开通群聊能力，也可在目标群 @机器人发送一个单号");
         return 0;
     }
 
@@ -103,20 +103,20 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
 {
     private readonly ConcurrentDictionary<string, byte> _handled = new(StringComparer.Ordinal);
     public Task RunAsync(CancellationToken cancellationToken) => qq.RunGatewayAsync(HandleAsync, cancellationToken);
-    private async Task HandleAsync(GroupMessage message, CancellationToken cancellationToken)
+    private async Task HandleAsync(QQIncomingMessage message, CancellationToken cancellationToken)
     {
         if (!_handled.TryAdd(message.Id, 0)) return;
-        if (!config.AllowedGroupOpenIds.Contains(message.GroupOpenid, StringComparer.Ordinal))
+        if (message.IsGroup && !config.AllowedGroupOpenIds.Contains(message.RecipientOpenid, StringComparer.Ordinal))
         {
-            Console.WriteLine($"发现未授权群。请关闭机器人后双击“添加群白名单”，并粘贴此群 OpenID：{message.GroupOpenid}");
+            Console.WriteLine($"发现未授权群。请关闭机器人后双击“添加群白名单”，并粘贴此群 OpenID：{message.RecipientOpenid}");
             return;
         }
         if (!TrackingNumberParser.TryParse(message.Content, out string number)) return;
-        await qq.SendTextAsync(message.GroupOpenid, $"正在查询单号 {number} 的录像", message.Id, 1, cancellationToken);
+        await qq.SendTextAsync(message, $"正在查询单号 {number} 的录像", message.Id, 1, cancellationToken);
         RecordingQuery query = await packingProof.CreateQueryAsync(number, cancellationToken);
         while (query.Status is "queued" or "searching" or "preparing") { await Task.Delay(1000, cancellationToken); query = await packingProof.GetQueryAsync(query.QueryId, cancellationToken); }
-        if (query.Status == "not_found") { await qq.SendTextAsync(message.GroupOpenid, $"未找到单号 {number} 的精确匹配录像", message.Id, 2, cancellationToken); return; }
-        if (query.Status is not ("ready" or "completed")) { await qq.SendTextAsync(message.GroupOpenid, string.IsNullOrWhiteSpace(query.Message) ? "录像查询失败" : query.Message, message.Id, 2, cancellationToken); return; }
+        if (query.Status == "not_found") { await qq.SendTextAsync(message, $"未找到单号 {number} 的精确匹配录像", message.Id, 2, cancellationToken); return; }
+        if (query.Status is not ("ready" or "completed")) { await qq.SendTextAsync(message, string.IsNullOrWhiteSpace(query.Message) ? "录像查询失败" : query.Message, message.Id, 2, cancellationToken); return; }
         int sequence = 2;
         foreach (Recording recording in query.Recordings.Where(item => item.Status == "ready" && item.DownloadUrl != null).Take(3))
         {
@@ -129,7 +129,7 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
             {
                 if (requiresDelivery)
                 {
-                    await qq.SendTextAsync(message.GroupOpenid, $"录像时长 {FormatDuration(recording.DurationSeconds)}，原片 {FormatMegabytes(recording.FileSizeBytes)}，正在生成不超过 {config.DeliveryMaxSizeMb} MB 的交付副本", message.Id, sequence++, cancellationToken);
+                    await qq.SendTextAsync(message, $"录像时长 {FormatDuration(recording.DurationSeconds)}，原片 {FormatMegabytes(recording.FileSizeBytes)}，正在生成不超过 {config.DeliveryMaxSizeMb} MB 的交付副本", message.Id, sequence++, cancellationToken);
                     delivery = await packingProof.CreateDeliveryAsync(query.QueryId, recording.RecordingId, config.DeliveryProfile, config.DeliveryMaxSizeMb, cancellationToken);
                     while (delivery.Status is "queued" or "transcoding" or "downloading")
                     {
@@ -138,7 +138,7 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
                     }
                     if (delivery.Status is not ("ready" or "completed"))
                     {
-                        await qq.SendTextAsync(message.GroupOpenid, DeliveryFailureText(delivery.ErrorCode), message.Id, sequence++, cancellationToken);
+                        await qq.SendTextAsync(message, DeliveryFailureText(delivery.ErrorCode), message.Id, sequence++, cancellationToken);
                         continue;
                     }
                     fileName = NormalizeFileName(delivery.FileName, number + "_转码.mp4");
@@ -157,11 +157,11 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
                 if (!download.IsSuccessStatusCode) throw new InvalidOperationException("下载录像失败");
                 await using Stream source = await download.Content.ReadAsStreamAsync(cancellationToken);
                 await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1024 * 1024, FileOptions.Asynchronous)) await source.CopyToAsync(output, cancellationToken);
-                    await qq.SendRecordingAsync(message.GroupOpenid, temporary, fileName, videoCodec, message.Id, sequence++, cancellationToken);
+                    await qq.SendRecordingAsync(message, temporary, fileName, videoCodec, message.Id, sequence++, cancellationToken);
                 }
                 finally { try { File.Delete(temporary); } catch { } }
             }
-            catch (Exception exception) { Console.Error.WriteLine($"转发{downloadKind}失败：{exception.Message}"); await qq.SendTextAsync(message.GroupOpenid, "录像已找到，但转发到 QQ 失败，请稍后重试", message.Id, sequence++, cancellationToken); }
+            catch (Exception exception) { Console.Error.WriteLine($"转发{downloadKind}失败：{exception.Message}"); await qq.SendTextAsync(message, "录像已找到，但转发到 QQ 失败，请稍后重试", message.Id, sequence++, cancellationToken); }
         }
     }
 

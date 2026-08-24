@@ -24,4 +24,19 @@ public sealed class QQClientTests
 
         Assert.Throws<InvalidDataException>(() => QQClient.ReadRequiredInt32(document.RootElement, "测试字段"));
     }
+
+    [Theory]
+    [InlineData("GROUP_AT_MESSAGE_CREATE", "{\"id\":\"group-message\",\"content\":\"SF123456\",\"group_openid\":\"group-openid\"}", true, "group-openid")]
+    [InlineData("C2C_MESSAGE_CREATE", "{\"id\":\"private-message\",\"content\":\"SF123456\",\"author\":{\"user_openid\":\"user-openid\"}}", false, "user-openid")]
+    public void TryCreateIncomingMessage_RecognizesSupportedConversation(string eventType, string json, bool isGroup, string recipientOpenid)
+    {
+        using JsonDocument document = JsonDocument.Parse(json);
+
+        QQIncomingMessage? message = QQClient.TryCreateIncomingMessage(eventType, document.RootElement);
+
+        Assert.NotNull(message);
+        Assert.Equal("SF123456", message.Content);
+        Assert.Equal(isGroup, message.IsGroup);
+        Assert.Equal(recipientOpenid, message.RecipientOpenid);
+    }
 }

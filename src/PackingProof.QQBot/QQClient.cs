@@ -11,6 +11,7 @@ namespace PackingProof.QQBot;
 
 public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, QQBotSecrets secrets)
 {
+    private static readonly JsonSerializerOptions GatewayJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly HttpClient _http = http;
     private readonly QQBotConfiguration _configuration = configuration;
     private readonly QQBotSecrets _secrets = secrets;
@@ -43,23 +44,23 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
         finally { _tokenGate.Release(); }
     }
 
-    public async Task SendTextAsync(string groupOpenId, string content, string? messageId, int sequence, CancellationToken cancellationToken)
+    public async Task SendTextAsync(QQIncomingMessage message, string content, string? messageId, int sequence, CancellationToken cancellationToken)
     {
         var body = new Dictionary<string, object?> { ["msg_type"] = 0, ["content"] = content };
         if (!string.IsNullOrWhiteSpace(messageId)) { body["msg_id"] = messageId; body["msg_seq"] = sequence; }
-        using HttpResponseMessage response = await SendAsync(HttpMethod.Post, "/v2/groups/" + Uri.EscapeDataString(groupOpenId) + "/messages", body, cancellationToken);
+        using HttpResponseMessage response = await SendAsync(HttpMethod.Post, MessageRoot(message) + "/messages", body, cancellationToken);
         using JsonDocument payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        EnsureSuccess(response, payload, "发送 QQ 群消息失败");
+        EnsureSuccess(response, payload, "发送 QQ 消息失败");
     }
 
-    public async Task SendRecordingAsync(string groupOpenId, string filePath, string fileName, string videoCodec, string messageId, int sequence, CancellationToken cancellationToken)
+    public async Task SendRecordingAsync(QQIncomingMessage message, string filePath, string fileName, string videoCodec, string messageId, int sequence, CancellationToken cancellationToken)
     {
         var file = new FileInfo(filePath);
         if (!file.Exists) throw new FileNotFoundException("待发送录像不存在", filePath);
         if (file.Length > 200L * 1024 * 1024) throw new InvalidOperationException("录像超过 QQ 单文件 200 MB 上限");
         int fileType = string.Equals(videoCodec, "h264", StringComparison.OrdinalIgnoreCase) && file.Length <= 30L * 1024 * 1024 ? 2 : 4;
         FileHashes hashes = await GetHashesAsync(filePath, cancellationToken);
-        string root = "/v2/groups/" + Uri.EscapeDataString(groupOpenId);
+        string root = MessageRoot(message);
         using HttpResponseMessage prepared = await SendAsync(HttpMethod.Post, root + "/upload_prepare", new { file_type = fileType, file_size = file.Length.ToString(), file_name = fileName, md5 = hashes.Md5, sha1 = hashes.Sha1, md5_10m = hashes.FirstTenMegabytesMd5 }, cancellationToken);
         using JsonDocument preparationBody = await JsonDocument.ParseAsync(await prepared.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         EnsureSuccess(prepared, preparationBody, "准备 QQ 录像上传失败");
@@ -85,7 +86,7 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
         EnsureSuccess(sent, sentBody, "发送 QQ 录像失败");
     }
 
-    public async Task RunGatewayAsync(Func<GroupMessage, CancellationToken, Task> handler, CancellationToken cancellationToken)
+    public async Task RunGatewayAsync(Func<QQIncomingMessage, CancellationToken, Task> handler, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -96,7 +97,7 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
         }
     }
 
-    private async Task RunGatewayConnectionAsync(Func<GroupMessage, CancellationToken, Task> handler, CancellationToken cancellationToken)
+    private async Task RunGatewayConnectionAsync(Func<QQIncomingMessage, CancellationToken, Task> handler, CancellationToken cancellationToken)
     {
         using var socket = new ClientWebSocket();
         await socket.ConnectAsync(new Uri(await GetGatewayAsync(cancellationToken)), cancellationToken);
@@ -120,14 +121,18 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
                     Console.WriteLine("QQ 网关已连接，机器人在线");
                     continue;
                 }
-                if (eventType is not ("GROUP_AT_MESSAGE_CREATE" or "GROUP_MESSAGE_CREATE"))
+                if (!payload.RootElement.TryGetProperty("d", out JsonElement body))
                 {
                     Console.WriteLine($"收到 QQ 事件：{eventType}");
                     continue;
                 }
-                Console.WriteLine("收到 QQ 群消息，正在读取群 OpenID");
-                GroupMessage? message = payload.RootElement.GetProperty("d").Deserialize<GroupMessage>();
-                if (message == null) continue;
+                QQIncomingMessage? message = TryCreateIncomingMessage(eventType, body);
+                if (message == null)
+                {
+                    Console.WriteLine($"收到 QQ 事件：{eventType}");
+                    continue;
+                }
+                Console.WriteLine(message.IsGroup ? "收到 QQ 群消息，正在读取群 OpenID" : "收到 QQ 私聊消息，正在查询单号");
                 _ = Task.Run(async () =>
                 {
                     try { await handler(message, cancellationToken); }
@@ -157,6 +162,25 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
 
     private static async Task SendGatewayAsync(ClientWebSocket socket, object payload, CancellationToken cancellationToken) =>
         await socket.SendAsync(JsonSerializer.SerializeToUtf8Bytes(payload), WebSocketMessageType.Text, true, cancellationToken);
+
+    internal static QQIncomingMessage? TryCreateIncomingMessage(string eventType, JsonElement body)
+    {
+        if (eventType is "GROUP_AT_MESSAGE_CREATE" or "GROUP_MESSAGE_CREATE")
+        {
+            GroupMessage? group = body.Deserialize<GroupMessage>(GatewayJsonOptions);
+            return string.IsNullOrWhiteSpace(group?.GroupOpenid) ? null : new QQIncomingMessage(group.Id, group.Content, group.GroupOpenid, true);
+        }
+
+        if (eventType == "C2C_MESSAGE_CREATE")
+        {
+            C2CMessage? direct = body.Deserialize<C2CMessage>(GatewayJsonOptions);
+            return string.IsNullOrWhiteSpace(direct?.Author.UserOpenid) ? null : new QQIncomingMessage(direct.Id, direct.Content, direct.Author.UserOpenid, false);
+        }
+
+        return null;
+    }
+
+    private static string MessageRoot(QQIncomingMessage message) => "/v2/" + (message.IsGroup ? "groups/" : "users/") + Uri.EscapeDataString(message.RecipientOpenid);
 
     private static void EnsureSuccess(HttpResponseMessage response, JsonDocument body, string fallback)
     {
@@ -213,3 +237,18 @@ public sealed class GroupMessage
     [JsonPropertyName("group_openid")]
     public string GroupOpenid { get; init; } = "";
 }
+
+public sealed class C2CMessage
+{
+    public string Id { get; init; } = "";
+    public string Content { get; init; } = "";
+    public C2CAuthor Author { get; init; } = new();
+}
+
+public sealed class C2CAuthor
+{
+    [JsonPropertyName("user_openid")]
+    public string UserOpenid { get; init; } = "";
+}
+
+public sealed record QQIncomingMessage(string Id, string Content, string RecipientOpenid, bool IsGroup);
