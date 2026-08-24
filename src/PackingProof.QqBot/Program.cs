@@ -30,10 +30,10 @@ internal static class Program
         if (!Uri.TryCreate(host, UriKind.Absolute, out _)) throw new InvalidDataException("PackingProof 地址无效");
         var config = new QqBotConfiguration { AppId = appId, PackingProofBaseUrl = host, ExtensionInstanceId = "qqbot-" + Guid.NewGuid().ToString("N") };
         using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(20) };
-        Console.WriteLine("请在 PackingProof 弹出的窗口批准录像查询和下载权限");
+        Console.WriteLine("请在 PackingProof 弹出的窗口批准录像查询、下载和交付副本权限");
         ExtensionCredentialState credential = await PackingProofClient.EnrollAsync(http, config, CancellationToken.None);
         store.Save(config, new QqBotSecrets { AppSecret = secret, ExtensionCredential = credential });
-        Console.WriteLine("配置已加密保存。启动后在目标群 @机器人发送单号，再用控制台显示的群 OpenID 加白名单");
+        Console.WriteLine("配置已加密保存。可编辑 settings.json 调整交付策略；启动后在目标群 @机器人发送单号，再用控制台显示的群 OpenID 加白名单");
         return 0;
     }
 
@@ -58,8 +58,8 @@ internal static class Program
         return 0;
     }
 
-    private static int Status(QqBotStateStore store) { QqBotConfiguration c = Config(store); Console.WriteLine($"PackingProof 地址：{c.PackingProofBaseUrl}\n允许群数量：{c.AllowedGroupOpenIds.Length}\n状态目录：{store.DirectoryPath}"); return 0; }
-    private static QqBotConfiguration Config(QqBotStateStore store) => store.LoadConfiguration() ?? throw new InvalidOperationException("尚未配置，请先运行 --configure");
+    private static int Status(QqBotStateStore store) { QqBotConfiguration c = Config(store); Console.WriteLine($"PackingProof 地址：{c.PackingProofBaseUrl}\n允许群数量：{c.AllowedGroupOpenIds.Length}\n交付策略：{c.DeliveryProfile}\n交付上限：{c.DeliveryMaxSizeMb} MB\n状态目录：{store.DirectoryPath}"); return 0; }
+    private static QqBotConfiguration Config(QqBotStateStore store) => (store.LoadConfiguration() ?? throw new InvalidOperationException("尚未配置，请先运行 --configure")).ValidateDeliverySettings();
     private static QqBotSecrets Secrets(QqBotStateStore store) => store.LoadSecrets() ?? throw new InvalidOperationException("缺少受保护密钥，请重新运行 --configure");
     private static string Optional(string label, string defaultValue) { Console.Write($"{label}（默认 {defaultValue}）："); return Console.ReadLine()?.Trim() is { Length: > 0 } value ? value : defaultValue; }
     private static string Required(string label, bool hidden = false)
@@ -70,7 +70,7 @@ internal static class Program
         while ((key = Console.ReadKey(true)).Key != ConsoleKey.Enter) { if (key.Key == ConsoleKey.Backspace && chars.Count > 0) chars.RemoveAt(chars.Count - 1); else if (!char.IsControl(key.KeyChar)) chars.Add(key.KeyChar); }
         Console.WriteLine(); return chars.Count > 0 ? new string(chars.ToArray()) : throw new InvalidDataException(label + "不能为空");
     }
-    private static int Usage() { Console.WriteLine("--configure | --run | --allow-group <群 OpenID> | --status"); return 0; }
+    private static int Usage() { Console.WriteLine("--configure | --run | --allow-group <群 OpenID> | --status\n交付设置保存在 settings.json：deliveryMaxSizeMb（1-200）和 deliveryProfile（source_codec_target_size 或 h265_target_size）"); return 0; }
 }
 
 internal sealed class QueryService(QqBotConfiguration config, PackingProofClient packingProof, QqClient qq)
@@ -90,18 +90,67 @@ internal sealed class QueryService(QqBotConfiguration config, PackingProofClient
         int sequence = 2;
         foreach (Recording recording in query.Recordings.Where(item => item.Status == "ready" && item.DownloadUrl != null).Take(3))
         {
-            if (recording.FileSizeBytes > 200L * 1024 * 1024) { await qq.SendTextAsync(message.GroupOpenid, "录像超过 QQ 单文件 200 MB 上限，暂不支持发送", message.Id, sequence++, cancellationToken); continue; }
-            string temporary = Path.Combine(Path.GetTempPath(), "PackingProof-QqBot-" + Guid.NewGuid().ToString("N") + ".mp4");
+            bool requiresDelivery = recording.FileSizeBytes > config.DeliveryMaxSizeMb * 1024L * 1024L;
+            RecordingDelivery? delivery = null;
+            string fileName = NormalizeFileName(recording.FileName, number + ".mp4");
+            string videoCodec = recording.VideoCodec;
+            string downloadKind = "录像";
             try
             {
-                using HttpResponseMessage download = await packingProof.DownloadAsync(query.QueryId, recording.RecordingId, cancellationToken);
+                if (requiresDelivery)
+                {
+                    await qq.SendTextAsync(message.GroupOpenid, $"录像时长 {FormatDuration(recording.DurationSeconds)}，原片 {FormatMegabytes(recording.FileSizeBytes)}，正在生成不超过 {config.DeliveryMaxSizeMb} MB 的交付副本", message.Id, sequence++, cancellationToken);
+                    delivery = await packingProof.CreateDeliveryAsync(query.QueryId, recording.RecordingId, config.DeliveryProfile, config.DeliveryMaxSizeMb, cancellationToken);
+                    while (delivery.Status is "queued" or "transcoding" or "downloading")
+                    {
+                        await Task.Delay(1000, cancellationToken);
+                        delivery = await packingProof.GetDeliveryAsync(query.QueryId, recording.RecordingId, delivery.DeliveryId, cancellationToken);
+                    }
+                    if (delivery.Status is not ("ready" or "completed"))
+                    {
+                        await qq.SendTextAsync(message.GroupOpenid, DeliveryFailureText(delivery.ErrorCode), message.Id, sequence++, cancellationToken);
+                        continue;
+                    }
+                    fileName = NormalizeFileName(delivery.FileName, number + "_转码.mp4");
+                    videoCodec = delivery.VideoCodec;
+                    downloadKind = "交付副本";
+                }
+
+                string extension = Path.GetExtension(fileName);
+                if (string.IsNullOrWhiteSpace(extension)) extension = ".mp4";
+                string temporary = Path.Combine(Path.GetTempPath(), "PackingProof-QqBot-" + Guid.NewGuid().ToString("N") + extension);
+                try
+                {
+                    using HttpResponseMessage download = delivery == null
+                        ? await packingProof.DownloadAsync(query.QueryId, recording.RecordingId, cancellationToken)
+                        : await packingProof.DownloadDeliveryAsync(query.QueryId, recording.RecordingId, delivery.DeliveryId, cancellationToken);
                 if (!download.IsSuccessStatusCode) throw new InvalidOperationException("下载录像失败");
                 await using Stream source = await download.Content.ReadAsStreamAsync(cancellationToken);
                 await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1024 * 1024, FileOptions.Asynchronous)) await source.CopyToAsync(output, cancellationToken);
-                await qq.SendRecordingAsync(message.GroupOpenid, temporary, number + ".mp4", recording.VideoCodec, message.Id, sequence++, cancellationToken);
+                    await qq.SendRecordingAsync(message.GroupOpenid, temporary, fileName, videoCodec, message.Id, sequence++, cancellationToken);
+                }
+                finally { try { File.Delete(temporary); } catch { } }
             }
-            catch (Exception exception) { Console.Error.WriteLine($"转发录像失败：{exception.Message}"); await qq.SendTextAsync(message.GroupOpenid, "录像已找到，但转发到 QQ 失败，请稍后重试", message.Id, sequence++, cancellationToken); }
-            finally { try { File.Delete(temporary); } catch { } }
+            catch (Exception exception) { Console.Error.WriteLine($"转发{downloadKind}失败：{exception.Message}"); await qq.SendTextAsync(message.GroupOpenid, "录像已找到，但转发到 QQ 失败，请稍后重试", message.Id, sequence++, cancellationToken); }
         }
     }
+
+    private static string NormalizeFileName(string value, string fallback)
+    {
+        string name = Path.GetFileName(value?.Trim() ?? "");
+        return string.IsNullOrWhiteSpace(name) ? fallback : name;
+    }
+
+    private static string FormatMegabytes(long bytes) => $"{bytes / 1024d / 1024d:0.0} MB";
+    private static string FormatDuration(double seconds) => TimeSpan.FromSeconds(Math.Max(0, seconds)).ToString(@"m\:ss");
+
+    private static string DeliveryFailureText(string errorCode) => errorCode switch
+    {
+        "delivery_size_limit_unreachable" => "录像已找到，但在不切割的前提下无法压入当前大小限制",
+        "delivery_ffmpeg_unavailable" => "录像已找到，但主机未找到 FFmpeg，无法生成交付副本",
+        "delivery_profile_unsupported" => "录像已找到，但当前交付预设不支持该录像编码",
+        "delivery_cache_limit_exceeded" => "录像已找到，但主机转码缓存空间不足",
+        "delivery_duration_unavailable" => "录像已找到，但缺少有效时长，无法计算目标码率",
+        _ => "录像已找到，但生成交付副本失败，请稍后重试"
+    };
 }

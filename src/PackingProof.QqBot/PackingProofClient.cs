@@ -20,8 +20,10 @@ public sealed class PackingProofClient(HttpClient http, QqBotConfiguration confi
         if (!capabilitiesResponse.IsSuccessStatusCode || !capabilities.RootElement.GetProperty("extensionApiEnabled").GetBoolean())
             throw new InvalidOperationException("PackingProof 尚未启用扩展 API");
         JsonElement features = capabilities.RootElement.GetProperty("features");
-        if (!features.GetProperty("recordingSearch").GetBoolean() || !features.GetProperty("recordingDownload").GetBoolean())
-            throw new InvalidOperationException("当前 PackingProof 不支持机器人录像查询或下载");
+        if (!features.GetProperty("recordingSearch").GetBoolean()
+            || !features.GetProperty("recordingDownload").GetBoolean()
+            || !features.GetProperty("recordingDelivery").GetBoolean())
+            throw new InvalidOperationException("当前 PackingProof 不支持机器人录像查询、下载或交付副本");
 
         var request = new
         {
@@ -32,7 +34,7 @@ public sealed class PackingProofClient(HttpClient http, QqBotConfiguration confi
             displayName = "PackingProof QQ 群机器人",
             version = "1.0",
             source = "PackingProof QQ bot adapter",
-            requestedPermissions = new[] { "recordings.search", "recordings.download" },
+            requestedPermissions = new[] { "recordings.search", "recordings.download", "recordings.delivery" },
             requestedCapabilities = Array.Empty<string>()
         };
         using HttpResponseMessage response = await http.PostAsJsonAsync(new Uri(config.PackingProofBaseUrl.TrimEnd('/') + "/api/extensions/v1/enroll"), request, cancellationToken);
@@ -54,6 +56,26 @@ public sealed class PackingProofClient(HttpClient http, QqBotConfiguration confi
 
     public Task<HttpResponseMessage> DownloadAsync(string queryId, long recordingId, CancellationToken cancellationToken) => SendAsync(
         HttpMethod.Get, $"/api/extensions/v1/recording-queries/{Uri.EscapeDataString(queryId)}/recordings/{recordingId}/download", null, cancellationToken);
+
+    public async Task<RecordingDelivery> CreateDeliveryAsync(string queryId, long recordingId, string profile, int maxFileSizeMb, CancellationToken cancellationToken) =>
+        await ReadDeliveryAsync(await SendAsync(
+            HttpMethod.Post,
+            $"/api/extensions/v1/recording-queries/{Uri.EscapeDataString(queryId)}/recordings/{recordingId}/deliveries",
+            new { profile, maxFileSizeMb },
+            cancellationToken), cancellationToken);
+
+    public async Task<RecordingDelivery> GetDeliveryAsync(string queryId, long recordingId, string deliveryId, CancellationToken cancellationToken) =>
+        await ReadDeliveryAsync(await SendAsync(
+            HttpMethod.Get,
+            $"/api/extensions/v1/recording-queries/{Uri.EscapeDataString(queryId)}/recordings/{recordingId}/deliveries/{Uri.EscapeDataString(deliveryId)}",
+            null,
+            cancellationToken), cancellationToken);
+
+    public Task<HttpResponseMessage> DownloadDeliveryAsync(string queryId, long recordingId, string deliveryId, CancellationToken cancellationToken) => SendAsync(
+        HttpMethod.Get,
+        $"/api/extensions/v1/recording-queries/{Uri.EscapeDataString(queryId)}/recordings/{recordingId}/deliveries/{Uri.EscapeDataString(deliveryId)}/download",
+        null,
+        cancellationToken);
 
     public async Task HeartbeatAsync(CancellationToken cancellationToken)
     {
@@ -91,6 +113,16 @@ public sealed class PackingProofClient(HttpClient http, QqBotConfiguration confi
         }
     }
 
+    private async Task<RecordingDelivery> ReadDeliveryAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        using (response)
+        {
+            using JsonDocument body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+            if (!response.IsSuccessStatusCode) throw new InvalidOperationException(ReadError(body, "PackingProof 交付副本请求失败"));
+            return body.RootElement.Deserialize<RecordingDelivery>(_json) ?? throw new InvalidDataException("交付副本响应无效");
+        }
+    }
+
     private static string ReadError(JsonDocument body, string fallback) => body.RootElement.TryGetProperty("error", out JsonElement error) ? error.GetString() ?? fallback : fallback;
 }
 
@@ -107,6 +139,21 @@ public sealed class Recording
     public long RecordingId { get; init; }
     public string Status { get; init; } = "";
     public long FileSizeBytes { get; init; }
+    public double DurationSeconds { get; init; }
     public string VideoCodec { get; init; } = "";
+    public string FileName { get; init; } = "";
+    public string? DownloadUrl { get; init; }
+}
+
+public sealed class RecordingDelivery
+{
+    public string DeliveryId { get; init; } = "";
+    public string Status { get; init; } = "";
+    public int Progress { get; init; }
+    public long FileSizeBytes { get; init; }
+    public double DurationSeconds { get; init; }
+    public string VideoCodec { get; init; } = "";
+    public string FileName { get; init; } = "";
+    public string ErrorCode { get; init; } = "";
     public string? DownloadUrl { get; init; }
 }
