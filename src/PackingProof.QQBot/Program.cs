@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Text;
-using System.Windows;
 
 namespace PackingProof.QQBot;
 
@@ -19,14 +17,10 @@ internal static class Program
         {
             return args.FirstOrDefault()?.ToLowerInvariant() switch
             {
-                "--configure" => await ConfigureAsync(store),
-                "--start" => await StartAsync(store),
-                "--delivery-settings" => ConfigureDeliverySettings(store),
-                "--allow-group" => AllowGroup(store, args.Skip(1).FirstOrDefault()),
-                "--run" => await RunAsync(store),
-                "--background" => await RunBackgroundAsync(store),
+                "--background" => RunBackground(store),
+                "--run" => RunBackground(store),
                 "--status" => Status(store),
-                _ => ShowWindow(store)
+                _ => RunManager(store)
             };
         }
         catch (Exception exception) { Console.Error.WriteLine(exception.Message); return 1; }
@@ -107,10 +101,10 @@ internal static class Program
     }
 
     private static int Status(QQBotStateStore store) { QQBotConfiguration c = Config(store); Console.WriteLine($"PackingProof 地址：{c.PackingProofBaseUrl}\n允许群数量：{c.AllowedGroupOpenIds.Length}\n交付策略：{c.DeliveryProfile}\n交付上限：{c.DeliveryMaxSizeMb} MB\n状态目录：{store.DirectoryPath}"); return 0; }
-    private static QQBotConfiguration Config(QQBotStateStore store) => (store.LoadConfiguration() ?? throw new InvalidOperationException("尚未配置，请先运行 --configure")).ValidateDeliverySettings();
-    private static QQBotSecrets Secrets(QQBotStateStore store) => store.LoadSecrets() ?? throw new InvalidOperationException("缺少受保护密钥，请重新运行 --configure");
+    internal static QQBotConfiguration Config(QQBotStateStore store) => (store.LoadConfiguration() ?? throw new InvalidOperationException("尚未配置，请先在管理界面中保存并授权")).ValidateDeliverySettings();
+    internal static QQBotSecrets Secrets(QQBotStateStore store) => store.LoadSecrets() ?? throw new InvalidOperationException("缺少受保护密钥，请先在管理界面中重新授权");
 
-    private static async Task<QQBotConfiguration> ResolvePackingProofHostAsync(QQBotStateStore store, QQBotConfiguration config, QQBotSecrets secrets, HttpClient http, CancellationToken cancellationToken)
+    internal static async Task<QQBotConfiguration> ResolvePackingProofHostAsync(QQBotStateStore store, QQBotConfiguration config, QQBotSecrets secrets, HttpClient http, CancellationToken cancellationToken)
     {
         var discovery = new PackingProofHostDiscovery(http);
         PackingProofHostInfo? current = await discovery.ProbeAsync(config.PackingProofBaseUrl, cancellationToken);
@@ -143,39 +137,23 @@ internal static class Program
         while ((key = Console.ReadKey(true)).Key != ConsoleKey.Enter) { if (key.Key == ConsoleKey.Backspace && chars.Count > 0) chars.RemoveAt(chars.Count - 1); else if (!char.IsControl(key.KeyChar)) chars.Add(key.KeyChar); }
         Console.WriteLine(); return chars.Count > 0 ? new string(chars.ToArray()) : throw new InvalidDataException(label + "不能为空");
     }
-    private static int Usage() { Console.WriteLine("请使用发布包中的“配置机器人”“启动机器人”“添加群白名单”和“视频发送设置”快捷方式"); return 0; }
-
-    private static int ShowWindow(QQBotStateStore store)
+    private static int RunManager(QQBotStateStore store)
     {
-        var application = new System.Windows.Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
-        application.Run(new QQBotManagerWindow(store));
-        return 0;
+        if (QQBotSingleInstance.TryActivateExisting()) return 0;
+        using var host = new QQBotApplicationHost(store, false, null);
+        return host.Run();
     }
 
-    private static async Task<int> RunBackgroundAsync(QQBotStateStore store)
+    private static int RunBackground(QQBotStateStore store)
     {
-        using var cancellation = new CancellationTokenSource();
-        using var context = new System.Windows.Forms.ApplicationContext();
-        using var menu = new System.Windows.Forms.ContextMenuStrip();
-        menu.Items.Add("打开管理界面", null, (_, _) =>
+        using var singleInstance = new QQBotSingleInstance();
+        if (!singleInstance.TryAcquire())
         {
-            string? executable = Environment.ProcessPath;
-            if (string.IsNullOrWhiteSpace(executable)) return;
-            Process.Start(new ProcessStartInfo(executable) { UseShellExecute = true });
-        });
-        menu.Items.Add("退出 QQBot", null, (_, _) => { cancellation.Cancel(); context.ExitThread(); });
-        using var icon = new System.Windows.Forms.NotifyIcon
-        {
-            Text = "PackingProof QQBot",
-            ContextMenuStrip = menu,
-            Visible = true,
-            Icon = System.Drawing.SystemIcons.Application
-        };
-        Task run = RunAsync(store, cancellation.Token);
-        System.Windows.Forms.Application.Run(context);
-        try { await run; return 0; }
-        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return 0; }
-        finally { icon.Visible = false; }
+            QQBotSingleInstance.TryActivateExisting();
+            return 0;
+        }
+        using var host = new QQBotApplicationHost(store, true, singleInstance.ActivationEvent);
+        return host.Run();
     }
 }
 

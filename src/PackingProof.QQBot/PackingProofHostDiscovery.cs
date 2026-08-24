@@ -75,6 +75,32 @@ internal sealed class PackingProofHostDiscovery(HttpClient http)
             : subnet.Status == TaskStatus.RanToCompletion ? subnet.Result : null;
     }
 
+    public async Task<IReadOnlyList<PackingProofHostInfo>> DiscoverAsync(CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        var hosts = new Dictionary<string, PackingProofHostInfo>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            await foreach (UdpAnnounce announce in DiscoverUdpAsync(timeout.Token))
+            {
+                PackingProofHostInfo? host = await ProbeAsync($"http://{announce.SourceIp}:{announce.HttpPort}", timeout.Token);
+                if (host != null) hosts[host.BaseUrl] = host;
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+
+        string[] candidates = GetLocalCandidates().Select(address => $"http://{address}:{DefaultHttpPort}").Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        for (int index = 0; index < candidates.Length && !timeout.IsCancellationRequested; index += 32)
+        {
+            PackingProofHostInfo?[] results;
+            try { results = await Task.WhenAll(candidates.Skip(index).Take(32).Select(address => ProbeAsync(address, timeout.Token))); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { break; }
+            foreach (PackingProofHostInfo? host in results.Where(host => host != null)) hosts[host!.BaseUrl] = host!;
+        }
+        return hosts.Values.OrderBy(host => host.NodeName, StringComparer.OrdinalIgnoreCase).ThenBy(host => host.BaseUrl, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
     private async Task<PackingProofHostInfo?> FindByUdpAsync(string nodeId, CancellationToken cancellationToken)
     {
         await foreach (UdpAnnounce announce in DiscoverUdpAsync(cancellationToken))

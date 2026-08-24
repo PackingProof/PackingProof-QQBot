@@ -16,6 +16,7 @@ namespace PackingProof.QQBot;
 internal sealed class QQBotManagerWindow : Window
 {
     private readonly QQBotStateStore _store;
+    private readonly QQBotRuntime _runtime;
     private readonly WpfTextBox _appId = new();
     private readonly WpfPasswordBox _appSecret = new();
     private readonly WpfTextBox _host = new();
@@ -23,20 +24,24 @@ internal sealed class QQBotManagerWindow : Window
     private readonly WpfListBox _groups = new();
     private readonly WpfTextBox _size = new();
     private readonly WpfComboBox _profile = new();
+    private readonly WpfListBox _foundHosts = new();
+    private readonly WpfTextBlock _hostInfo = new();
     private readonly WpfTextBlock _status = new();
-    private CancellationTokenSource? _runCancellation;
-    private Task? _runTask;
+    private WpfButton? _startupButton;
 
-    public QQBotManagerWindow(QQBotStateStore store)
+    public QQBotManagerWindow(QQBotStateStore store, QQBotRuntime runtime)
     {
         _store = store;
+        _runtime = runtime;
         Title = "PackingProof QQBot";
         Width = 620;
-        MinHeight = 620;
+        Height = 760;
+        MinHeight = 680;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Content = BuildContent();
         Load();
-        Closed += (_, _) => _runCancellation?.Cancel();
+        _runtime.StatusChanged += OnRuntimeStatusChanged;
+        Closed += (_, _) => _runtime.StatusChanged -= OnRuntimeStatusChanged;
     }
 
     private UIElement BuildContent()
@@ -47,7 +52,10 @@ internal sealed class QQBotManagerWindow : Window
         AddField(panel, "QQ AppID", _appId);
         AddField(panel, "QQ AppSecret", _appSecret);
         AddField(panel, "PackingProof 地址", _host);
-        panel.Children.Add(Row(Button("保存并授权", SaveAsync), Button("测试主机", TestHostAsync)));
+        panel.Children.Add(Row(Button("保存并授权", SaveAsync), Button("测试主机", TestHostAsync), Button("搜索局域网主机", SearchHostsAsync)));
+        panel.Children.Add(_hostInfo);
+        panel.Children.Add(_foundHosts);
+        panel.Children.Add(Row(Button("使用选中主机", UseSelectedHost)));
         panel.Children.Add(new WpfSeparator { Margin = new Thickness(0, 18, 0, 12) });
         panel.Children.Add(new WpfTextBlock { Text = "QQ 群白名单", FontWeight = FontWeights.SemiBold });
         panel.Children.Add(_groups);
@@ -58,7 +66,9 @@ internal sealed class QQBotManagerWindow : Window
         _profile.Items.Add("转为 H.265");
         panel.Children.Add(Row(new WpfTextBlock { Text = "最大大小（MB）", VerticalAlignment = VerticalAlignment.Center }, _size, _profile, Button("保存视频设置", SaveDelivery)));
         panel.Children.Add(new WpfSeparator { Margin = new Thickness(0, 18, 0, 12) });
-        panel.Children.Add(Row(Button("启动机器人", StartAsync), Button("停止机器人", Stop), Button("切换开机自动启动", ToggleStartup)));
+        _startupButton = Button("", ToggleStartup);
+        panel.Children.Add(Row(Button("启动机器人", StartAsync), Button("停止机器人", Stop), _startupButton));
+        panel.Children.Add(new WpfTextBlock { Text = "运行日志", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 12, 0, 3) });
         panel.Children.Add(_status);
         return new WpfScrollViewer { Content = panel, VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto };
     }
@@ -93,6 +103,8 @@ internal sealed class QQBotManagerWindow : Window
         _size.Text = (config?.DeliveryMaxSizeMb ?? QQBotConfiguration.DefaultDeliveryMaxSizeMb).ToString();
         _profile.SelectedIndex = config?.DeliveryProfile == QQBotConfiguration.H265TargetSizeProfile ? 1 : 0;
         RefreshGroups(config);
+        RefreshHostInfo(config);
+        if (_startupButton != null) _startupButton.Content = config?.StartWithWindows == true ? "关闭开机自动启动" : "登录 Windows 后自动启动";
     }
 
     private void RefreshGroups(QQBotConfiguration? config = null)
@@ -102,7 +114,14 @@ internal sealed class QQBotManagerWindow : Window
 
     private async void SaveAsync(object sender, RoutedEventArgs eventArgs)
     {
-        try { SetStatus("正在请求 PackingProof 授权"); await Program.SaveConfigurationAsync(_store, _appId.Text.Trim(), _appSecret.Password, _host.Text.Trim(), CancellationToken.None); Load(); SetStatus("配置已保存"); }
+        try
+        {
+            SetStatus("正在请求 PackingProof 授权，请在主程序窗口中批准");
+            await Program.SaveConfigurationAsync(_store, _appId.Text.Trim(), _appSecret.Password, _host.Text.Trim(), CancellationToken.None);
+            Load();
+            _runtime.Start();
+            SetStatus("配置已保存，正在启动机器人");
+        }
         catch (Exception exception) { SetStatus(exception.Message); }
     }
 
@@ -110,7 +129,31 @@ internal sealed class QQBotManagerWindow : Window
     {
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
         PackingProofHostInfo? host = await new PackingProofHostDiscovery(http).ProbeAsync(_host.Text, CancellationToken.None);
-        SetStatus(host == null ? "未找到可用的 PackingProof 主机" : $"已连接：{host.NodeName}｜{host.BaseUrl}");
+        if (host == null) { SetStatus("未找到可用的 PackingProof 主机"); return; }
+        _host.Text = host.BaseUrl;
+        _hostInfo.Text = FormatHost(host);
+        SetStatus("主机连接正常。首次使用或更换主机后，请保存并授权");
+    }
+
+    private async void SearchHostsAsync(object sender, RoutedEventArgs eventArgs)
+    {
+        try
+        {
+            SetStatus("正在搜索局域网中的 PackingProof 主机");
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            IReadOnlyList<PackingProofHostInfo> hosts = await new PackingProofHostDiscovery(http).DiscoverAsync(CancellationToken.None);
+            _foundHosts.ItemsSource = hosts;
+            SetStatus(hosts.Count == 0 ? "没有找到主机，请确认主程序已打开且在同一局域网" : $"找到 {hosts.Count} 台主机。选择后仍需保存并重新授权");
+        }
+        catch (Exception exception) { SetStatus("搜索主机失败：" + exception.Message); }
+    }
+
+    private void UseSelectedHost(object sender, RoutedEventArgs eventArgs)
+    {
+        if (_foundHosts.SelectedItem is not PackingProofHostInfo host) { SetStatus("请先选择一台主机"); return; }
+        _host.Text = host.BaseUrl;
+        _hostInfo.Text = FormatHost(host);
+        SetStatus("已选择新主机。为保护录像权限，请点击“保存并授权”完成确认");
     }
 
     private void AddGroup(object sender, RoutedEventArgs eventArgs)
@@ -137,27 +180,36 @@ internal sealed class QQBotManagerWindow : Window
         _store.Save(config, RequireSecrets()); SetStatus("视频设置已保存");
     }
 
-    private async void StartAsync(object sender, RoutedEventArgs eventArgs)
+    private void StartAsync(object sender, RoutedEventArgs eventArgs)
     {
-        if (_runTask != null) return;
-        _runCancellation = new CancellationTokenSource();
-        _runTask = Program.RunAsync(_store, _runCancellation.Token);
-        SetStatus("机器人正在启动");
-        try { await _runTask; SetStatus("机器人已停止"); } catch (Exception exception) { SetStatus(exception.Message); } finally { _runTask = null; _runCancellation?.Dispose(); _runCancellation = null; }
+        try { _runtime.Start(); SetStatus("机器人正在启动"); }
+        catch (Exception exception) { SetStatus(exception.Message); }
     }
 
-    private void Stop(object sender, RoutedEventArgs eventArgs) => _runCancellation?.Cancel();
+    private void Stop(object sender, RoutedEventArgs eventArgs) { _runtime.Stop(); SetStatus("正在停止机器人"); }
     private void ToggleStartup(object sender, RoutedEventArgs eventArgs)
     {
         QQBotConfiguration config = RequireConfig();
         bool enabled = !config.StartWithWindows;
         WindowsStartup.SetEnabled(enabled);
         _store.Save(config with { StartWithWindows = enabled }, RequireSecrets());
+        if (_startupButton != null) _startupButton.Content = enabled ? "关闭开机自动启动" : "登录 Windows 后自动启动";
         SetStatus(enabled ? "已设置登录 Windows 后后台启动" : "已关闭开机自动启动");
     }
     private QQBotConfiguration RequireConfig() => _store.LoadConfiguration() ?? throw new InvalidOperationException("请先保存并授权");
     private QQBotSecrets RequireSecrets() => _store.LoadSecrets() ?? throw new InvalidOperationException("请先保存并授权");
-    private void SetStatus(string text) => _status.Text = text;
+    private void RefreshHostInfo(QQBotConfiguration? config)
+    {
+        _hostInfo.Text = config == null
+            ? "当前主机：尚未配置"
+            : $"当前主机：{config.PackingProofBaseUrl}｜nodeId：{(string.IsNullOrWhiteSpace(config.PackingProofNodeId) ? "等待首次验证" : config.PackingProofNodeId)}";
+    }
+    private static string FormatHost(PackingProofHostInfo host) => $"主机：{host.NodeName}｜地址：{host.BaseUrl}｜nodeId：{host.NodeId}";
+    private void OnRuntimeStatusChanged(string status) => Dispatcher.BeginInvoke(() => SetStatus(status));
+    private void SetStatus(string text)
+    {
+        _status.Text = $"{DateTime.Now:HH:mm:ss} {text}";
+    }
 }
 
 internal static class WpfControlExtensions

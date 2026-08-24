@@ -7,11 +7,16 @@ using System.Text.Json;
 
 namespace PackingProof.QQBot;
 
-public sealed class PackingProofClient(HttpClient http, QQBotConfiguration configuration, ExtensionCredentialState credential)
+public sealed class PackingProofClient(
+    HttpClient http,
+    QQBotConfiguration configuration,
+    ExtensionCredentialState credential,
+    Func<CancellationToken, Task<QQBotConfiguration?>>? recoverConfiguration = null)
 {
     private readonly HttpClient _http = http;
-    private readonly QQBotConfiguration _configuration = configuration;
+    private QQBotConfiguration _configuration = configuration;
     private readonly ExtensionCredentialState _credential = credential;
+    private readonly Func<CancellationToken, Task<QQBotConfiguration?>>? _recoverConfiguration = recoverConfiguration;
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
 
     public static async Task<ExtensionCredentialState> EnrollAsync(HttpClient http, QQBotConfiguration config, CancellationToken cancellationToken)
@@ -101,6 +106,21 @@ public sealed class PackingProofClient(HttpClient http, QQBotConfiguration confi
     }
 
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, object? value, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await SendOnceAsync(method, path, value, cancellationToken);
+        }
+        catch (HttpRequestException) when (_recoverConfiguration != null)
+        {
+            QQBotConfiguration? recovered = await _recoverConfiguration(cancellationToken);
+            if (recovered == null) throw;
+            _configuration = recovered;
+            return await SendOnceAsync(method, path, value, cancellationToken);
+        }
+    }
+
+    private async Task<HttpResponseMessage> SendOnceAsync(HttpMethod method, string path, object? value, CancellationToken cancellationToken)
     {
         byte[] body = value == null ? [] : JsonSerializer.SerializeToUtf8Bytes(value, _json);
         string timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
