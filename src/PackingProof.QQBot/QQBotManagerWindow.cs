@@ -1,4 +1,5 @@
 using System.Windows;
+using WpfBorder = System.Windows.Controls.Border;
 using WpfButton = System.Windows.Controls.Button;
 using WpfComboBox = System.Windows.Controls.ComboBox;
 using WpfControl = System.Windows.Controls.Control;
@@ -29,15 +30,19 @@ internal sealed class QQBotManagerWindow : Window
     private readonly WpfTextBlock _hostInfo = new();
     private readonly WpfTextBlock _status = new();
     private WpfButton? _startupButton;
+    private WpfButton? _useSelectedHostButton;
 
     public QQBotManagerWindow(QQBotStateStore store, QQBotRuntime runtime)
     {
         _store = store;
         _runtime = runtime;
         Title = "PackingProof QQBot";
-        Width = 620;
-        Height = 760;
+        Width = 860;
+        Height = 820;
+        MinWidth = 720;
         MinHeight = 680;
+        Background = Brush(245, 247, 250);
+        FontFamily = new System.Windows.Media.FontFamily("Microsoft YaHei UI, Segoe UI");
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Content = BuildContent();
         Load();
@@ -52,44 +57,90 @@ internal sealed class QQBotManagerWindow : Window
 
     private UIElement BuildContent()
     {
-        var panel = new WpfStackPanel { Margin = new Thickness(24) };
-        panel.Children.Add(new WpfTextBlock { Text = "PackingProof QQBot", FontSize = 24, FontWeight = FontWeights.SemiBold });
-        panel.Children.Add(new WpfTextBlock { Text = "首次填写后会在 PackingProof 中请求授权。AppSecret 仅加密保存在当前 Windows 用户账户", Margin = new Thickness(0, 6, 0, 18), TextWrapping = TextWrapping.Wrap });
-        AddField(panel, "QQ AppID", _appId);
-        AddField(panel, "QQ AppSecret", _appSecret);
-        AddField(panel, "PackingProof 地址", _host);
-        panel.Children.Add(Row(Button("保存并授权", SaveAsync), Button("测试主机", TestHostAsync), Button("搜索局域网主机", SearchHostsAsync)));
-        panel.Children.Add(_hostInfo);
-        panel.Children.Add(_foundHosts);
-        panel.Children.Add(Row(Button("使用选中主机", UseSelectedHost)));
-        panel.Children.Add(new WpfSeparator { Margin = new Thickness(0, 18, 0, 12) });
-        panel.Children.Add(new WpfTextBlock { Text = "QQ 群白名单", FontWeight = FontWeights.SemiBold });
-        panel.Children.Add(_groups);
-        panel.Children.Add(Row(_groupOpenId, Button("添加", AddGroup), Button("删除选中", RemoveGroup)));
-        panel.Children.Add(new WpfSeparator { Margin = new Thickness(0, 18, 0, 12) });
-        panel.Children.Add(new WpfTextBlock { Text = "视频发送", FontWeight = FontWeights.SemiBold });
+        var panel = new WpfStackPanel { Margin = new Thickness(28, 24, 28, 32) };
+        panel.Children.Add(new WpfTextBlock { Text = "PackingProof QQBot", FontSize = 28, FontWeight = FontWeights.SemiBold, Foreground = Brush(31, 41, 55) });
+        panel.Children.Add(new WpfTextBlock
+        {
+            Text = "在 QQ 私聊或指定群里发送单号，自动查找并回传对应打包录像",
+            Foreground = Brush(100, 116, 139),
+            FontSize = 14,
+            Margin = new Thickness(0, 6, 0, 18)
+        });
+
+        _status.TextWrapping = TextWrapping.Wrap;
+        _status.Foreground = Brush(30, 64, 175);
+        panel.Children.Add(new WpfBorder { Background = Brush(239, 246, 255), BorderBrush = Brush(191, 219, 254), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(14, 10, 14, 10), Child = _status, Margin = new Thickness(0, 0, 0, 14) });
+
+        var connection = new WpfStackPanel();
+        AddField(connection, "QQ AppID", "在 QQ 开放平台的开发设置中获取", _appId);
+        AddField(connection, "QQ AppSecret", "只会加密保存在当前 Windows 用户账户", _appSecret);
+        AddField(connection, "PackingProof 地址", "同一台电脑可保持默认地址；也可搜索局域网主机", _host);
+        connection.Children.Add(Row(PrimaryButton("保存并授权", SaveAsync), Button("测试连接", TestHostAsync), Button("搜索局域网主机", SearchHostsAsync)));
+        _hostInfo.TextWrapping = TextWrapping.Wrap;
+        _hostInfo.Foreground = Brush(71, 85, 105);
+        _hostInfo.Margin = new Thickness(0, 12, 0, 0);
+        connection.Children.Add(_hostInfo);
+        _foundHosts.MaxHeight = 110;
+        _foundHosts.Visibility = Visibility.Collapsed;
+        _foundHosts.Margin = new Thickness(0, 10, 0, 0);
+        connection.Children.Add(_foundHosts);
+        _useSelectedHostButton = Button("使用选中主机", UseSelectedHost);
+        _useSelectedHostButton.Visibility = Visibility.Collapsed;
+        connection.Children.Add(Row(_useSelectedHostButton));
+        panel.Children.Add(Card("连接与授权", "填写一次即可。更换地址或重新授权时，已有群和视频设置会保留", connection));
+
+        var groups = new WpfStackPanel();
+        _groups.MaxHeight = 100;
+        _groups.Margin = new Thickness(0, 0, 0, 8);
+        groups.Children.Add(_groups);
+        _groupOpenId.MinWidth = 330;
+        _groupOpenId.Height = 32;
+        groups.Children.Add(Row(_groupOpenId, PrimaryButton("添加到白名单", AddGroup), Button("删除选中", RemoveGroup)));
+        panel.Children.Add(Card("QQ 群白名单", "首次在群里 @机器人 后，从运行日志复制群 OpenID 并添加到这里", groups));
+
+        var delivery = new WpfStackPanel();
         _profile.Items.Add("保持原编码并降低码率");
         _profile.Items.Add("转为 H.265");
-        panel.Children.Add(Row(new WpfTextBlock { Text = "最大大小（MB）", VerticalAlignment = VerticalAlignment.Center }, _size, _profile, Button("保存视频设置", SaveDelivery)));
-        panel.Children.Add(new WpfSeparator { Margin = new Thickness(0, 18, 0, 12) });
+        _size.Width = 68;
+        _profile.MinWidth = 220;
+        delivery.Children.Add(Row(new WpfTextBlock { Text = "单个视频上限（MB）", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) }, _size, _profile, Button("保存视频设置", SaveDelivery)));
+        delivery.Children.Add(new WpfTextBlock { Text = "超限时由 PackingProof 主机生成临时副本，原始录像不会修改或切割", Foreground = Brush(100, 116, 139), Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(Card("视频发送", "默认 190 MB，可设为 1–200 MB", delivery));
+
+        var runtime = new WpfStackPanel();
         _startupButton = Button("", ToggleStartup);
-        panel.Children.Add(Row(Button("启动机器人", StartAsync), Button("停止机器人", Stop), _startupButton));
-        panel.Children.Add(new WpfTextBlock { Text = "运行日志", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 12, 0, 3) });
-        panel.Children.Add(_logs);
-        panel.Children.Add(_status);
-        return new WpfScrollViewer { Content = panel, VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto };
+        runtime.Children.Add(Row(PrimaryButton("启动机器人", StartAsync), Button("停止机器人", Stop), _startupButton));
+        runtime.Children.Add(new WpfTextBlock { Text = "关闭窗口后机器人仍会在系统托盘运行。需要完全停止时，请从托盘菜单选择“退出 QQBot”", Foreground = Brush(100, 116, 139), Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(Card("运行与维护", "可选：设置登录 Windows 后自动在后台启动", runtime));
+
+        _logs.MaxHeight = 160;
+        _logs.Background = Brush(248, 250, 252);
+        panel.Children.Add(Card("运行日志", "用于查看机器人是否在线、收到的群 OpenID 和错误提示", _logs));
+        return new WpfScrollViewer { Content = panel, VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto, Background = Brush(245, 247, 250) };
     }
 
-    private static void AddField(WpfPanel panel, string label, WpfControl control)
+    private static WpfBorder Card(string title, string description, UIElement content)
     {
-        panel.Children.Add(new WpfTextBlock { Text = label, Margin = new Thickness(0, 6, 0, 3) });
-        control.MinWidth = 300;
+        var panel = new WpfStackPanel { Margin = new Thickness(18, 16, 18, 18) };
+        panel.Children.Add(new WpfTextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold, Foreground = Brush(30, 41, 59) });
+        panel.Children.Add(new WpfTextBlock { Text = description, Foreground = Brush(100, 116, 139), Margin = new Thickness(0, 4, 0, 14), TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(content);
+        return new WpfBorder { Background = System.Windows.Media.Brushes.White, BorderBrush = Brush(226, 232, 240), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Child = panel, Margin = new Thickness(0, 0, 0, 14) };
+    }
+
+    private static void AddField(WpfPanel panel, string label, string description, WpfControl control)
+    {
+        panel.Children.Add(new WpfTextBlock { Text = label, FontWeight = FontWeights.SemiBold, Foreground = Brush(51, 65, 85), Margin = new Thickness(0, 0, 0, 3) });
+        panel.Children.Add(new WpfTextBlock { Text = description, Foreground = Brush(100, 116, 139), FontSize = 12, Margin = new Thickness(0, 0, 0, 5) });
+        control.MinWidth = 420;
+        control.Height = 32;
+        control.Margin = new Thickness(0, 0, 0, 12);
         panel.Children.Add(control);
     }
 
     private static WpfStackPanel Row(params UIElement[] children)
     {
-        var panel = new WpfStackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        var panel = new WpfStackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
         foreach (UIElement child in children)
         {
             if (child is FrameworkElement element) element.Margin = new Thickness(0, 0, 8, 0);
@@ -98,7 +149,21 @@ internal sealed class QQBotManagerWindow : Window
         return panel;
     }
 
-    private static WpfButton Button(string text, RoutedEventHandler handler) => new WpfButton { Content = text, Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(0, 0, 8, 0), }.Also(button => button.Click += handler);
+    private static WpfButton Button(string text, RoutedEventHandler handler) => CreateButton(text, handler, false);
+    private static WpfButton PrimaryButton(string text, RoutedEventHandler handler) => CreateButton(text, handler, true);
+    private static WpfButton CreateButton(string text, RoutedEventHandler handler, bool primary) => new WpfButton
+    {
+        Content = text,
+        Padding = new Thickness(14, 6, 14, 6),
+        MinHeight = 32,
+        Background = primary ? Brush(37, 99, 235) : System.Windows.Media.Brushes.White,
+        Foreground = primary ? System.Windows.Media.Brushes.White : Brush(51, 65, 85),
+        BorderBrush = primary ? Brush(37, 99, 235) : Brush(203, 213, 225),
+        BorderThickness = new Thickness(1),
+        Cursor = System.Windows.Input.Cursors.Hand
+    }.Also(button => button.Click += handler);
+
+    private static System.Windows.Media.SolidColorBrush Brush(byte red, byte green, byte blue) => new(System.Windows.Media.Color.FromRgb(red, green, blue));
 
     private void Load()
     {
@@ -114,6 +179,7 @@ internal sealed class QQBotManagerWindow : Window
         _logs.Items.Clear();
         foreach (string entry in QQBotLog.Snapshot()) _logs.Items.Add(entry);
         if (_startupButton != null) _startupButton.Content = config?.StartWithWindows == true ? "关闭开机自动启动" : "登录 Windows 后自动启动";
+        SetStatus(config == null ? "请填写 QQ AppID、AppSecret 和 PackingProof 地址，然后保存并授权" : "管理器已就绪，可启动机器人或修改设置");
     }
 
     private void RefreshGroups(QQBotConfiguration? config = null)
@@ -152,6 +218,8 @@ internal sealed class QQBotManagerWindow : Window
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
             IReadOnlyList<PackingProofHostInfo> hosts = await new PackingProofHostDiscovery(http).DiscoverAsync(CancellationToken.None);
             _foundHosts.ItemsSource = hosts;
+            _foundHosts.Visibility = hosts.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+            if (_useSelectedHostButton != null) _useSelectedHostButton.Visibility = hosts.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
             SetStatus(hosts.Count == 0 ? "没有找到主机，请确认主程序已打开且在同一局域网" : $"找到 {hosts.Count} 台主机。选择后仍需保存并重新授权");
         }
         catch (Exception exception) { SetStatus("搜索主机失败：" + exception.Message); }
