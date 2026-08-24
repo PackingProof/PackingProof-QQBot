@@ -111,7 +111,12 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
             Console.WriteLine($"发现未授权群。请关闭机器人后双击“添加群白名单”，并粘贴此群 OpenID：{message.RecipientOpenid}");
             return;
         }
-        if (!TrackingNumberParser.TryParse(message.Content, out string number)) return;
+        if (!TrackingNumberParser.TryParse(message.Content, out string number))
+        {
+            if (!message.IsGroup)
+                await qq.SendTextAsync(message, "请直接发送完整快递单号，例如 SF1234567890", message.Id, 1, cancellationToken);
+            return;
+        }
         await qq.SendTextAsync(message, $"正在查询单号 {number} 的录像", message.Id, 1, cancellationToken);
         RecordingQuery query = await packingProof.CreateQueryAsync(number, cancellationToken);
         while (query.Status is "queued" or "searching" or "preparing") { await Task.Delay(1000, cancellationToken); query = await packingProof.GetQueryAsync(query.QueryId, cancellationToken); }
