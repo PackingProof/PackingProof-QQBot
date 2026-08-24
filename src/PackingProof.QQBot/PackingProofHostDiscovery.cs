@@ -34,7 +34,7 @@ internal sealed record PackingProofHostInfo
 /// 与 PackingProof Desktop 的 WorkstationNetwork 保持相同协议：先验证旧地址，
 /// 再通过 UDP 广播和受限 IPv4 子网扫描寻找相同 nodeId 的主机。
 /// </summary>
-internal sealed class PackingProofHostDiscovery(HttpClient http)
+internal sealed class PackingProofHostDiscovery(HttpClient http, IEnumerable<string>? scanCandidates = null)
 {
     private const int DefaultHttpPort = 5280;
     private const int UdpPort = 5281;
@@ -42,6 +42,7 @@ internal sealed class PackingProofHostDiscovery(HttpClient http)
     private const int MaxSubnetHosts = 1022;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly HttpClient _http = http;
+    private readonly string[]? _scanCandidates = scanCandidates?.ToArray();
 
     public async Task<PackingProofHostInfo?> ProbeAsync(string baseUrl, CancellationToken cancellationToken)
     {
@@ -66,7 +67,7 @@ internal sealed class PackingProofHostDiscovery(HttpClient http)
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(5));
-        Task<PackingProofHostInfo?> udp = FindByUdpAsync(nodeId, timeout.Token);
+        Task<PackingProofHostInfo?> udp = _scanCandidates == null ? FindByUdpAsync(nodeId, timeout.Token) : Task.FromResult<PackingProofHostInfo?>(null);
         Task<PackingProofHostInfo?> subnet = FindBySubnetAsync(nodeId, timeout.Token);
         try { await Task.WhenAll(udp, subnet); }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
@@ -114,8 +115,8 @@ internal sealed class PackingProofHostDiscovery(HttpClient http)
 
     private async Task<PackingProofHostInfo?> FindBySubnetAsync(string nodeId, CancellationToken cancellationToken)
     {
-        string[] candidates = GetLocalCandidates()
-            .SelectMany(address => new[] { $"http://{address}:{DefaultHttpPort}" })
+        string[] candidates = _scanCandidates ?? GetLocalCandidates()
+            .Select(address => $"http://{address}:{DefaultHttpPort}")
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         for (int index = 0; index < candidates.Length; index += 32)
