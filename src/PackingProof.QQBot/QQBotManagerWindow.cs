@@ -276,9 +276,9 @@ internal sealed class QQBotManagerWindow : Window
     {
         _hostInfo.Text = config == null
             ? "当前主机：尚未配置"
-            : $"当前主机：{(string.IsNullOrWhiteSpace(config.PackingProofNodeName) ? "名称待确认" : config.PackingProofNodeName)}｜{config.PackingProofBaseUrl}｜nodeId：{(string.IsNullOrWhiteSpace(config.PackingProofNodeId) ? "等待首次验证" : config.PackingProofNodeId)}";
+            : $"当前主机：{(string.IsNullOrWhiteSpace(config.PackingProofNodeName) ? "名称待确认" : config.PackingProofNodeName)}｜{config.PackingProofBaseUrl}";
     }
-    private static string FormatHost(PackingProofHostInfo host) => $"主机：{host.NodeName}｜地址：{host.BaseUrl}｜nodeId：{host.NodeId}";
+    private static string FormatHost(PackingProofHostInfo host) => $"主机：{host.NodeName}｜地址：{host.BaseUrl}";
     private void OnRuntimeStatusChanged(string status) => Dispatcher.BeginInvoke(() => SetStatus(status));
     private void OnLogWritten(string entry) => Dispatcher.BeginInvoke(() =>
     {
