@@ -6,24 +6,24 @@ namespace PackingProof.QQBot;
 internal static class Program
 {
     [STAThread]
-    private static async Task<int> Main(string[] args)
+    private static Task<int> Main(string[] args)
     {
-        if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("此适配器只能在 Windows 上运行"); return 1; }
+        if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("此适配器只能在 Windows 上运行"); return Task.FromResult(1); }
         Console.InputEncoding = Encoding.UTF8;
         Console.OutputEncoding = Encoding.UTF8;
         Console.SetError(new StreamWriter(Console.OpenStandardError(), Encoding.UTF8) { AutoFlush = true });
         var store = new QQBotStateStore();
         try
         {
-            return args.FirstOrDefault()?.ToLowerInvariant() switch
+            return Task.FromResult(args.FirstOrDefault()?.ToLowerInvariant() switch
             {
                 "--background" => RunBackground(store),
                 "--run" => RunBackground(store),
                 "--status" => Status(store),
                 _ => RunManager(store)
-            };
+            });
         }
-        catch (Exception exception) { Console.Error.WriteLine(exception.Message); return 1; }
+        catch (Exception exception) { Console.Error.WriteLine(exception.Message); return Task.FromResult(1); }
     }
 
     private static async Task<int> ConfigureAsync(QQBotStateStore store)
