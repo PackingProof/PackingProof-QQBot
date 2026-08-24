@@ -34,8 +34,16 @@ internal static class Program
         string secret = Required("QQ AppSecret", hidden: true);
         string host = Optional("PackingProof 地址", "http://127.0.0.1:5280").TrimEnd('/');
         if (!Uri.TryCreate(host, UriKind.Absolute, out _)) throw new InvalidDataException("PackingProof 地址无效");
-        var config = new QQBotConfiguration { AppId = appId, PackingProofBaseUrl = host, ExtensionInstanceId = "qqbot-" + Guid.NewGuid().ToString("N") };
         using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(20) };
+        PackingProofHostInfo? packingProofHost = await new PackingProofHostDiscovery(http).ProbeAsync(host, CancellationToken.None);
+        if (packingProofHost == null) throw new InvalidOperationException("无法确认 PackingProof 主机，请检查地址、局域网连接和主程序版本");
+        var config = new QQBotConfiguration
+        {
+            AppId = appId,
+            PackingProofBaseUrl = packingProofHost.BaseUrl,
+            PackingProofNodeId = packingProofHost.NodeId,
+            ExtensionInstanceId = "qqbot-" + Guid.NewGuid().ToString("N")
+        };
         Console.WriteLine("请在 PackingProof 弹出的窗口批准录像查询、下载和交付副本权限");
         ExtensionCredentialState credential = await PackingProofClient.EnrollAsync(http, config, CancellationToken.None);
         store.Save(config, new QQBotSecrets { AppSecret = secret, ExtensionCredential = credential });
@@ -80,6 +88,7 @@ internal static class Program
         QQBotConfiguration config = Config(store); QQBotSecrets secrets = Secrets(store);
         if (secrets.ExtensionCredential == null) throw new InvalidOperationException("缺少扩展凭据，请重新运行 --configure");
         using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(20) };
+        config = await ResolvePackingProofHostAsync(store, config, secrets, http, CancellationToken.None);
         using var cancelled = new CancellationTokenSource();
         Console.CancelKeyPress += (_, eventArgs) => { eventArgs.Cancel = true; cancelled.Cancel(); };
         var service = new QueryService(config, new PackingProofClient(http, config, secrets.ExtensionCredential), new QQClient(http, config, secrets));
@@ -91,6 +100,24 @@ internal static class Program
     private static int Status(QQBotStateStore store) { QQBotConfiguration c = Config(store); Console.WriteLine($"PackingProof 地址：{c.PackingProofBaseUrl}\n允许群数量：{c.AllowedGroupOpenIds.Length}\n交付策略：{c.DeliveryProfile}\n交付上限：{c.DeliveryMaxSizeMb} MB\n状态目录：{store.DirectoryPath}"); return 0; }
     private static QQBotConfiguration Config(QQBotStateStore store) => (store.LoadConfiguration() ?? throw new InvalidOperationException("尚未配置，请先运行 --configure")).ValidateDeliverySettings();
     private static QQBotSecrets Secrets(QQBotStateStore store) => store.LoadSecrets() ?? throw new InvalidOperationException("缺少受保护密钥，请重新运行 --configure");
+
+    private static async Task<QQBotConfiguration> ResolvePackingProofHostAsync(QQBotStateStore store, QQBotConfiguration config, QQBotSecrets secrets, HttpClient http, CancellationToken cancellationToken)
+    {
+        var discovery = new PackingProofHostDiscovery(http);
+        PackingProofHostInfo? current = await discovery.ProbeAsync(config.PackingProofBaseUrl, cancellationToken);
+        if (current == null && !string.IsNullOrWhiteSpace(config.PackingProofNodeId))
+        {
+            Console.WriteLine("PackingProof 地址不可用，正在局域网查找原来的主机");
+            current = await discovery.FindByNodeIdAsync(config.PackingProofNodeId, config.PackingProofBaseUrl, cancellationToken);
+        }
+        if (current == null) throw new InvalidOperationException("无法连接 PackingProof 主机，请确认主程序正在运行且与机器人在同一局域网");
+        if (!string.IsNullOrWhiteSpace(config.PackingProofNodeId)
+            && !string.Equals(config.PackingProofNodeId, current.NodeId, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("当前地址不是已授权的 PackingProof 主机，为保护授权凭据未自动切换");
+        QQBotConfiguration resolved = config with { PackingProofBaseUrl = current.BaseUrl, PackingProofNodeId = current.NodeId };
+        if (resolved != config) store.Save(resolved, secrets);
+        return resolved;
+    }
     private static string Optional(string label, string defaultValue) { Console.Write($"{label}（默认 {defaultValue}）："); return Console.ReadLine()?.Trim() is { Length: > 0 } value ? value : defaultValue; }
     private static int ReadInt(string label, int defaultValue, int minimum, int maximum)
     {

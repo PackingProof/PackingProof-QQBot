@@ -13,6 +13,7 @@ public sealed record QQBotConfiguration
 
     public string AppId { get; init; } = "";
     public string PackingProofBaseUrl { get; init; } = "http://127.0.0.1:5280";
+    public string PackingProofNodeId { get; init; } = "";
     public string ExtensionInstanceId { get; init; } = "";
     public string[] AllowedGroupOpenIds { get; init; } = [];
     public int DeliveryMaxSizeMb { get; init; } = DefaultDeliveryMaxSizeMb;
