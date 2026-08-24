@@ -58,11 +58,11 @@ internal sealed class QQBotRuntime(QQBotStateStore store) : IDisposable
             QQBotConfiguration recovered = await Program.ResolvePackingProofHostAsync(_store, configuration, secrets, http, token);
             bool changed = !string.Equals(recovered.PackingProofBaseUrl, configuration.PackingProofBaseUrl, StringComparison.OrdinalIgnoreCase);
             configuration = recovered;
-            if (changed) StatusChanged?.Invoke($"已恢复 PackingProof 主机：{configuration.PackingProofBaseUrl}");
+            if (changed) PublishStatus($"已恢复 PackingProof 主机：{configuration.PackingProofBaseUrl}");
             return changed ? recovered : null;
         });
 
-        StatusChanged?.Invoke("正在连接 QQ 网关");
+        PublishStatus("正在连接 QQ 网关");
         var service = new QueryService(configuration, packingProof, new QQClient(http, configuration, secrets));
         await service.RunAsync(cancellationToken);
     }
@@ -72,15 +72,15 @@ internal sealed class QQBotRuntime(QQBotStateStore store) : IDisposable
         try
         {
             await task;
-            StatusChanged?.Invoke("机器人已停止");
+            PublishStatus("机器人已停止");
         }
         catch (OperationCanceledException)
         {
-            StatusChanged?.Invoke("机器人已停止");
+            PublishStatus("机器人已停止");
         }
         catch (Exception exception)
         {
-            StatusChanged?.Invoke("机器人无法启动：" + exception.Message);
+            PublishStatus("机器人无法启动：" + exception.Message);
         }
     }
 
@@ -88,5 +88,11 @@ internal sealed class QQBotRuntime(QQBotStateStore store) : IDisposable
     {
         Stop();
         _cancellation?.Dispose();
+    }
+
+    private void PublishStatus(string status)
+    {
+        QQBotLog.Write(status);
+        StatusChanged?.Invoke(status);
     }
 }

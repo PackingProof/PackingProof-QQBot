@@ -25,6 +25,7 @@ internal sealed class QQBotManagerWindow : Window
     private readonly WpfTextBox _size = new();
     private readonly WpfComboBox _profile = new();
     private readonly WpfListBox _foundHosts = new();
+    private readonly WpfListBox _logs = new() { MaxHeight = 150 };
     private readonly WpfTextBlock _hostInfo = new();
     private readonly WpfTextBlock _status = new();
     private WpfButton? _startupButton;
@@ -41,7 +42,12 @@ internal sealed class QQBotManagerWindow : Window
         Content = BuildContent();
         Load();
         _runtime.StatusChanged += OnRuntimeStatusChanged;
-        Closed += (_, _) => _runtime.StatusChanged -= OnRuntimeStatusChanged;
+        QQBotLog.Written += OnLogWritten;
+        Closed += (_, _) =>
+        {
+            _runtime.StatusChanged -= OnRuntimeStatusChanged;
+            QQBotLog.Written -= OnLogWritten;
+        };
     }
 
     private UIElement BuildContent()
@@ -69,6 +75,7 @@ internal sealed class QQBotManagerWindow : Window
         _startupButton = Button("", ToggleStartup);
         panel.Children.Add(Row(Button("启动机器人", StartAsync), Button("停止机器人", Stop), _startupButton));
         panel.Children.Add(new WpfTextBlock { Text = "运行日志", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 12, 0, 3) });
+        panel.Children.Add(_logs);
         panel.Children.Add(_status);
         return new WpfScrollViewer { Content = panel, VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto };
     }
@@ -104,6 +111,8 @@ internal sealed class QQBotManagerWindow : Window
         _profile.SelectedIndex = config?.DeliveryProfile == QQBotConfiguration.H265TargetSizeProfile ? 1 : 0;
         RefreshGroups(config);
         RefreshHostInfo(config);
+        _logs.Items.Clear();
+        foreach (string entry in QQBotLog.Snapshot()) _logs.Items.Add(entry);
         if (_startupButton != null) _startupButton.Content = config?.StartWithWindows == true ? "关闭开机自动启动" : "登录 Windows 后自动启动";
     }
 
@@ -206,6 +215,12 @@ internal sealed class QQBotManagerWindow : Window
     }
     private static string FormatHost(PackingProofHostInfo host) => $"主机：{host.NodeName}｜地址：{host.BaseUrl}｜nodeId：{host.NodeId}";
     private void OnRuntimeStatusChanged(string status) => Dispatcher.BeginInvoke(() => SetStatus(status));
+    private void OnLogWritten(string entry) => Dispatcher.BeginInvoke(() =>
+    {
+        _logs.Items.Add(entry);
+        while (_logs.Items.Count > 100) _logs.Items.RemoveAt(0);
+        _logs.ScrollIntoView(entry);
+    });
     private void SetStatus(string text)
     {
         _status.Text = $"{DateTime.Now:HH:mm:ss} {text}";

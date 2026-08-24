@@ -96,7 +96,7 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
         {
             try { await RunGatewayConnectionAsync(handler, cancellationToken); }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
-            catch (Exception exception) { Console.Error.WriteLine($"QQ 网关已断开：{exception.Message}"); }
+            catch (Exception exception) { QQBotLog.Write($"QQ 网关已断开：{exception.Message}"); }
             await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
         }
     }
@@ -122,25 +122,25 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
                 string eventType = type.GetString() ?? "";
                 if (string.Equals(eventType, "READY", StringComparison.Ordinal))
                 {
-                    Console.WriteLine("QQ 网关已连接，机器人在线");
+                    QQBotLog.Write("QQ 网关已连接，机器人在线");
                     continue;
                 }
                 if (!payload.RootElement.TryGetProperty("d", out JsonElement body))
                 {
-                    Console.WriteLine($"收到 QQ 事件：{eventType}");
+                    QQBotLog.Write($"收到 QQ 事件：{eventType}");
                     continue;
                 }
                 QQIncomingMessage? message = TryCreateIncomingMessage(eventType, body);
                 if (message == null)
                 {
-                    Console.WriteLine($"收到 QQ 事件：{eventType}");
+                    QQBotLog.Write($"收到 QQ 事件：{eventType}");
                     continue;
                 }
-                Console.WriteLine(message.IsGroup ? "收到 QQ 群消息，正在读取群 OpenID" : "收到 QQ 私聊消息，正在查询单号");
+                QQBotLog.Write(message.IsGroup ? $"收到 QQ 群消息，群 OpenID：{message.RecipientOpenid}" : "收到 QQ 私聊消息，正在查询单号");
                 _ = Task.Run(async () =>
                 {
                     try { await handler(message, cancellationToken); }
-                    catch (Exception exception) { Console.Error.WriteLine($"处理 QQ 群消息失败：{exception.Message}"); }
+                    catch (Exception exception) { QQBotLog.Write($"处理 QQ 消息失败：{exception.Message}"); }
                 }, CancellationToken.None);
             }
         }

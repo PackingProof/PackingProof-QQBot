@@ -110,7 +110,7 @@ internal static class Program
         PackingProofHostInfo? current = await discovery.ProbeAsync(config.PackingProofBaseUrl, cancellationToken);
         if (current == null && !string.IsNullOrWhiteSpace(config.PackingProofNodeId))
         {
-            Console.WriteLine("PackingProof 地址不可用，正在局域网查找原来的主机");
+            QQBotLog.Write("PackingProof 地址不可用，正在局域网查找原来的主机");
             current = await discovery.FindByNodeIdAsync(config.PackingProofNodeId, config.PackingProofBaseUrl, cancellationToken);
         }
         if (current == null) throw new InvalidOperationException("无法连接 PackingProof 主机，请确认主程序正在运行且与机器人在同一局域网");
@@ -175,7 +175,7 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
         if (!_handled.TryAdd(message.Id, 0)) return;
         if (message.IsGroup && !config.AllowedGroupOpenIds.Contains(message.RecipientOpenid, StringComparer.Ordinal))
         {
-            Console.WriteLine($"发现未授权群。请关闭机器人后双击“添加群白名单”，并粘贴此群 OpenID：{message.RecipientOpenid}");
+            QQBotLog.Write($"发现未授权群，请在管理器的白名单中添加群 OpenID：{message.RecipientOpenid}");
             return;
         }
         if (string.Equals(message.Content.Trim(), "继续", StringComparison.Ordinal))
@@ -298,7 +298,7 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"转发{downloadKind}失败：{exception.Message}");
+            QQBotLog.Write($"转发{downloadKind}失败：{exception.Message}");
             await qq.SendTextAsync(message, "录像已找到，但转发到 QQ 失败，请稍后重试", message.Id, sequence, cancellationToken);
         }
     }
