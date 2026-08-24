@@ -13,6 +13,7 @@ internal static class Program
             return args.FirstOrDefault()?.ToLowerInvariant() switch
             {
                 "--configure" => await ConfigureAsync(store),
+                "--delivery-settings" => ConfigureDeliverySettings(store),
                 "--allow-group" => AllowGroup(store, args.Skip(1).FirstOrDefault()),
                 "--run" => await RunAsync(store),
                 "--status" => Status(store),
@@ -33,16 +34,30 @@ internal static class Program
         Console.WriteLine("请在 PackingProof 弹出的窗口批准录像查询、下载和交付副本权限");
         ExtensionCredentialState credential = await PackingProofClient.EnrollAsync(http, config, CancellationToken.None);
         store.Save(config, new QqBotSecrets { AppSecret = secret, ExtensionCredential = credential });
-        Console.WriteLine("配置已加密保存。可编辑 settings.json 调整交付策略；启动后在目标群 @机器人发送单号，再用控制台显示的群 OpenID 加白名单");
+        Console.WriteLine("配置已保存。接下来双击“启动机器人”，在目标群 @机器人发送一个单号；控制台会显示加群白名单所需的群 OpenID");
         return 0;
     }
 
     private static int AllowGroup(QqBotStateStore store, string? group)
     {
-        if (string.IsNullOrWhiteSpace(group)) throw new ArgumentException("用法：--allow-group <群 OpenID>");
+        group = string.IsNullOrWhiteSpace(group) ? Required("群 OpenID") : group.Trim();
         QqBotConfiguration config = Config(store); QqBotSecrets secrets = Secrets(store);
-        store.Save(config with { AllowedGroupOpenIds = config.AllowedGroupOpenIds.Append(group.Trim()).Distinct(StringComparer.Ordinal).Order().ToArray() }, secrets);
+        store.Save(config with { AllowedGroupOpenIds = config.AllowedGroupOpenIds.Append(group).Distinct(StringComparer.Ordinal).Order().ToArray() }, secrets);
         Console.WriteLine("已加入群白名单"); return 0;
+    }
+
+    private static int ConfigureDeliverySettings(QqBotStateStore store)
+    {
+        QqBotConfiguration config = Config(store);
+        QqBotSecrets secrets = Secrets(store);
+        Console.WriteLine("视频发送设置：原片不超过限制时直接发送，超限时由 PackingProof 主机生成临时副本");
+        int size = ReadInt("单个视频最大大小（MB）", config.DeliveryMaxSizeMb, QqBotConfiguration.MinimumDeliveryMaxSizeMb, QqBotConfiguration.MaximumDeliveryMaxSizeMb);
+        Console.WriteLine("1. 优先保持原视频编码（推荐）\n2. 超限时转为 H.265，体积更小");
+        string selection = Optional("请输入 1 或 2", config.DeliveryProfile == QqBotConfiguration.H265TargetSizeProfile ? "2" : "1");
+        string profile = selection == "2" ? QqBotConfiguration.H265TargetSizeProfile : QqBotConfiguration.SourceCodecTargetSizeProfile;
+        store.Save((config with { DeliveryMaxSizeMb = size, DeliveryProfile = profile }).ValidateDeliverySettings(), secrets);
+        Console.WriteLine($"已保存：最大 {size} MB，{(profile == QqBotConfiguration.H265TargetSizeProfile ? "转 H.265" : "保持原视频编码")}");
+        return 0;
     }
 
     private static async Task<int> RunAsync(QqBotStateStore store)
@@ -62,6 +77,13 @@ internal static class Program
     private static QqBotConfiguration Config(QqBotStateStore store) => (store.LoadConfiguration() ?? throw new InvalidOperationException("尚未配置，请先运行 --configure")).ValidateDeliverySettings();
     private static QqBotSecrets Secrets(QqBotStateStore store) => store.LoadSecrets() ?? throw new InvalidOperationException("缺少受保护密钥，请重新运行 --configure");
     private static string Optional(string label, string defaultValue) { Console.Write($"{label}（默认 {defaultValue}）："); return Console.ReadLine()?.Trim() is { Length: > 0 } value ? value : defaultValue; }
+    private static int ReadInt(string label, int defaultValue, int minimum, int maximum)
+    {
+        string value = Optional(label, defaultValue.ToString());
+        if (!int.TryParse(value, out int result) || result < minimum || result > maximum)
+            throw new InvalidDataException($"{label} 必须在 {minimum} 到 {maximum} 之间");
+        return result;
+    }
     private static string Required(string label, bool hidden = false)
     {
         Console.Write(label + "：");
@@ -70,7 +92,7 @@ internal static class Program
         while ((key = Console.ReadKey(true)).Key != ConsoleKey.Enter) { if (key.Key == ConsoleKey.Backspace && chars.Count > 0) chars.RemoveAt(chars.Count - 1); else if (!char.IsControl(key.KeyChar)) chars.Add(key.KeyChar); }
         Console.WriteLine(); return chars.Count > 0 ? new string(chars.ToArray()) : throw new InvalidDataException(label + "不能为空");
     }
-    private static int Usage() { Console.WriteLine("--configure | --run | --allow-group <群 OpenID> | --status\n交付设置保存在 settings.json：deliveryMaxSizeMb（1-200）和 deliveryProfile（source_codec_target_size 或 h265_target_size）"); return 0; }
+    private static int Usage() { Console.WriteLine("请使用发布包中的“配置机器人”“启动机器人”“添加群白名单”和“视频发送设置”快捷方式"); return 0; }
 }
 
 internal sealed class QueryService(QqBotConfiguration config, PackingProofClient packingProof, QqClient qq)
@@ -80,7 +102,11 @@ internal sealed class QueryService(QqBotConfiguration config, PackingProofClient
     private async Task HandleAsync(GroupMessage message, CancellationToken cancellationToken)
     {
         if (!_handled.TryAdd(message.Id, 0)) return;
-        if (!config.AllowedGroupOpenIds.Contains(message.GroupOpenid, StringComparer.Ordinal)) { Console.WriteLine($"未授权群 OpenID：{message.GroupOpenid}"); return; }
+        if (!config.AllowedGroupOpenIds.Contains(message.GroupOpenid, StringComparer.Ordinal))
+        {
+            Console.WriteLine($"发现未授权群。请关闭机器人后双击“添加群白名单”，并粘贴此群 OpenID：{message.GroupOpenid}");
+            return;
+        }
         if (!TrackingNumberParser.TryParse(message.Content, out string number)) return;
         await qq.SendTextAsync(message.GroupOpenid, $"正在查询单号 {number} 的录像", message.Id, 1, cancellationToken);
         RecordingQuery query = await packingProof.CreateQueryAsync(number, cancellationToken);

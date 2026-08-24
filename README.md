@@ -6,9 +6,18 @@
 
 当前仓库包含可配置的首版实现。需要在 Windows 上通过 QQ 开放平台创建机器人，并在 PackingProof 中批准 `recordings.search`、`recordings.download` 和 `recordings.delivery` 权限。
 
-## 交付副本设置
+## 只需四步
 
-首次执行 `--configure` 后，可编辑状态目录中的 `settings.json`。其中不含 QQ AppSecret 或扩展凭据；这些敏感数据保存在单独的 DPAPI 保护文件中。
+1. 下载并解压 Windows 发布包，不需要安装 .NET 或 FFmpeg
+2. 双击“配置机器人”，输入 QQ AppID、AppSecret 和 PackingProof 地址；在 PackingProof 弹窗中批准授权
+3. 双击“启动机器人”，把机器人拉进目标群并 @机器人发一个单号；控制台会显示群 OpenID
+4. 关闭机器人，双击“添加群白名单”并粘贴群 OpenID；再双击“启动机器人”即可使用
+
+视频大小与编码不需要改 JSON：双击“视频发送设置”，按提示选择大小和编码即可。敏感信息使用 Windows 加密保存。
+
+## 视频发送设置
+
+如需由管理员统一下发设置，也可以编辑状态目录中的 `settings.json`。其中不含 QQ AppSecret 或扩展凭据；这些敏感数据保存在单独的 Windows 加密文件中。
 
 ```json
 {
