@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text;
 
 namespace PackingProof.QQBot;
 
@@ -8,10 +7,7 @@ internal static class Program
     [STAThread]
     private static Task<int> Main(string[] args)
     {
-        if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("此适配器只能在 Windows 上运行"); return Task.FromResult(1); }
-        Console.InputEncoding = Encoding.UTF8;
-        Console.OutputEncoding = Encoding.UTF8;
-        Console.SetError(new StreamWriter(Console.OpenStandardError(), Encoding.UTF8) { AutoFlush = true });
+        if (!OperatingSystem.IsWindows()) return Task.FromResult(1);
         var store = new QQBotStateStore();
         try
         {
@@ -23,7 +19,11 @@ internal static class Program
                 _ => RunManager(store)
             });
         }
-        catch (Exception exception) { Console.Error.WriteLine(exception.Message); return Task.FromResult(1); }
+        catch (Exception exception)
+        {
+            System.Windows.MessageBox.Show(exception.Message, "PackingProof QQBot", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            return Task.FromResult(1);
+        }
     }
 
     private static async Task<int> ConfigureAsync(QQBotStateStore store)
