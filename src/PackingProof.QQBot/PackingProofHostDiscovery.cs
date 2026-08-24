@@ -48,7 +48,7 @@ internal sealed class PackingProofHostDiscovery(HttpClient http)
         if (!TryNormalizeBaseUrl(baseUrl, out Uri? uri)) return null;
         try
         {
-            using HttpResponseMessage response = await _http.GetAsync(new Uri(uri, "/api/node-info"), cancellationToken);
+            using HttpResponseMessage response = await _http.GetAsync(new Uri(uri!, "/api/node-info"), cancellationToken);
             if (!response.IsSuccessStatusCode) return null;
             PackingProofHostInfo? node = await response.Content.ReadFromJsonAsync<PackingProofHostInfo>(cancellationToken: cancellationToken);
             if (node?.IsValidHost != true) return null;
@@ -67,17 +67,11 @@ internal sealed class PackingProofHostDiscovery(HttpClient http)
         timeout.CancelAfter(TimeSpan.FromSeconds(5));
         Task<PackingProofHostInfo?> udp = FindByUdpAsync(nodeId, timeout.Token);
         Task<PackingProofHostInfo?> subnet = FindBySubnetAsync(nodeId, timeout.Token);
-        while (udp.IsCompleted == false || subnet.IsCompleted == false)
-        {
-            Task completed = await Task.WhenAny(udp, subnet);
-            PackingProofHostInfo? match = completed == udp ? await udp : await subnet;
-            if (match != null)
-            {
-                timeout.Cancel();
-                return match;
-            }
-        }
-        return null;
+        try { await Task.WhenAll(udp, subnet); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+        return udp.Status == TaskStatus.RanToCompletion && udp.Result != null
+            ? udp.Result
+            : subnet.Status == TaskStatus.RanToCompletion ? subnet.Result : null;
     }
 
     private async Task<PackingProofHostInfo?> FindByUdpAsync(string nodeId, CancellationToken cancellationToken)
@@ -135,7 +129,7 @@ internal sealed class PackingProofHostDiscovery(HttpClient http)
     private static IEnumerable<IPAddress> EnumerateSubnet(IPAddress address, IPAddress? mask)
     {
         byte[] bytes = address.GetAddressBytes();
-        byte[] maskBytes = mask?.GetAddressBytes() is { Length: 4 } value ? value : [255, 255, 255, 0];
+        byte[] maskBytes = mask?.GetAddressBytes() is { Length: 4 } maskValueBytes ? maskValueBytes : [255, 255, 255, 0];
         uint addressValue = ToUInt32(bytes);
         uint maskValue = ToUInt32(maskBytes);
         uint network = addressValue & maskValue;
@@ -146,7 +140,7 @@ internal sealed class PackingProofHostDiscovery(HttpClient http)
             network = addressValue & maskValue;
             broadcast = network | ~maskValue;
         }
-        for (uint value = network + 1; value < broadcast; value++) yield return new IPAddress([(byte)(value >> 24), (byte)(value >> 16), (byte)(value >> 8), (byte)value]);
+        for (uint candidateValue = network + 1; candidateValue < broadcast; candidateValue++) yield return new IPAddress([(byte)(candidateValue >> 24), (byte)(candidateValue >> 16), (byte)(candidateValue >> 8), (byte)candidateValue]);
     }
 
     private static uint ToUInt32(byte[] bytes) => ((uint)bytes[0] << 24) | ((uint)bytes[1] << 16) | ((uint)bytes[2] << 8) | bytes[3];
@@ -166,6 +160,7 @@ internal sealed class PackingProofHostDiscovery(HttpClient http)
             try { result = await udp.ReceiveAsync(timeout.Token); }
             catch (OperationCanceledException) { yield break; }
             if (result.Buffer.Length > MaxPacketBytes) continue;
+            UdpAnnounce? announce = null;
             try
             {
                 UdpPacket? packet = JsonSerializer.Deserialize<UdpPacket>(result.Buffer, JsonOptions);
@@ -174,9 +169,10 @@ internal sealed class PackingProofHostDiscovery(HttpClient http)
                     && packet.Action == "announce"
                     && Guid.TryParse(packet.NodeId, out Guid nodeId) && nodeId != Guid.Empty
                     && packet.HttpPort is > 0 and <= 65535)
-                    yield return new UdpAnnounce(nodeId.ToString("D"), packet.HttpPort, result.RemoteEndPoint.Address.ToString());
+                    announce = new UdpAnnounce(nodeId.ToString("D"), packet.HttpPort, result.RemoteEndPoint.Address.ToString());
             }
             catch (JsonException) { }
+            if (announce != null) yield return announce;
         }
     }
 
