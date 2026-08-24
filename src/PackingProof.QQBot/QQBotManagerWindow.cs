@@ -63,7 +63,11 @@ internal sealed class QQBotManagerWindow : Window
 
         _status.TextWrapping = TextWrapping.Wrap;
         _status.Foreground = Brush(30, 64, 175);
-        panel.Children.Add(new WpfBorder { Background = Brush(239, 246, 255), BorderBrush = Brush(191, 219, 254), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(14, 10, 14, 10), Child = _status, Margin = new Thickness(0, 0, 0, 14) });
+        var controls = new WpfStackPanel();
+        controls.Children.Add(_status);
+        _startupButton = Button("", ToggleStartup);
+        controls.Children.Add(Row(PrimaryButton("启动机器人", StartAsync), Button("停止机器人", Stop), _startupButton));
+        panel.Children.Add(new WpfBorder { Background = Brush(239, 246, 255), BorderBrush = Brush(191, 219, 254), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(14, 10, 14, 10), Child = controls, Margin = new Thickness(0, 0, 0, 14) });
 
         var connection = new WpfStackPanel();
         AddField(connection, "QQ AppID", _appId);
@@ -104,11 +108,6 @@ internal sealed class QQBotManagerWindow : Window
         _profile.VerticalContentAlignment = VerticalAlignment.Center;
         delivery.Children.Add(Row(new WpfTextBlock { Text = "单个视频上限（MB）", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) }, _size, _profile, Button("保存视频设置", SaveDelivery)));
         panel.Children.Add(Card("视频发送", delivery));
-
-        var runtime = new WpfStackPanel();
-        _startupButton = Button("", ToggleStartup);
-        runtime.Children.Add(Row(PrimaryButton("启动机器人", StartAsync), Button("停止机器人", Stop), _startupButton));
-        panel.Children.Add(Card("运行与维护", runtime));
 
         _logs.MaxHeight = 160;
         _logs.Background = Brush(248, 250, 252);
