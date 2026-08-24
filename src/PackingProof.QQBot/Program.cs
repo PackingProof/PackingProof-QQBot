@@ -10,7 +10,7 @@ internal static class Program
         if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("此适配器只能在 Windows 上运行"); return 1; }
         Console.InputEncoding = Encoding.UTF8;
         Console.OutputEncoding = Encoding.UTF8;
-        Console.Error.OutputEncoding = Encoding.UTF8;
+        Console.SetError(new StreamWriter(Console.OpenStandardError(), Encoding.UTF8) { AutoFlush = true });
         var store = new QQBotStateStore();
         try
         {
