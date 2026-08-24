@@ -18,6 +18,7 @@ public sealed record QQBotConfiguration
     public string[] AllowedGroupOpenIds { get; init; } = [];
     public int DeliveryMaxSizeMb { get; init; } = DefaultDeliveryMaxSizeMb;
     public string DeliveryProfile { get; init; } = SourceCodecTargetSizeProfile;
+    public bool StartWithWindows { get; init; }
 
     public QQBotConfiguration ValidateDeliverySettings()
     {

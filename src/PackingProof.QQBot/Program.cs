@@ -1,10 +1,13 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
+using System.Windows;
 
 namespace PackingProof.QQBot;
 
 internal static class Program
 {
+    [STAThread]
     private static async Task<int> Main(string[] args)
     {
         if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("此适配器只能在 Windows 上运行"); return 1; }
@@ -21,8 +24,9 @@ internal static class Program
                 "--delivery-settings" => ConfigureDeliverySettings(store),
                 "--allow-group" => AllowGroup(store, args.Skip(1).FirstOrDefault()),
                 "--run" => await RunAsync(store),
+                "--background" => await RunBackgroundAsync(store),
                 "--status" => Status(store),
-                _ => Usage()
+                _ => ShowWindow(store)
             };
         }
         catch (Exception exception) { Console.Error.WriteLine(exception.Message); return 1; }
@@ -34,6 +38,16 @@ internal static class Program
         string secret = Required("QQ AppSecret", hidden: true);
         string host = Optional("PackingProof 地址", "http://127.0.0.1:5280").TrimEnd('/');
         if (!Uri.TryCreate(host, UriKind.Absolute, out _)) throw new InvalidDataException("PackingProof 地址无效");
+        await SaveConfigurationAsync(store, appId, secret, host, CancellationToken.None);
+        Console.WriteLine("配置已保存。接下来双击“启动机器人”，在私聊中向机器人发送一个单号；也可在目标群 @机器人发送一个单号");
+        return 0;
+    }
+
+    internal static async Task SaveConfigurationAsync(QQBotStateStore store, string appId, string secret, string host, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(appId)) throw new InvalidDataException("QQ AppID 不能为空");
+        if (string.IsNullOrWhiteSpace(secret)) throw new InvalidDataException("QQ AppSecret 不能为空");
+        if (!Uri.TryCreate(host, UriKind.Absolute, out _)) throw new InvalidDataException("PackingProof 地址无效");
         using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(20) };
         PackingProofHostInfo? packingProofHost = await new PackingProofHostDiscovery(http).ProbeAsync(host, CancellationToken.None);
         if (packingProofHost == null) throw new InvalidOperationException("无法确认 PackingProof 主机，请检查地址、局域网连接和主程序版本");
@@ -44,11 +58,8 @@ internal static class Program
             PackingProofNodeId = packingProofHost.NodeId,
             ExtensionInstanceId = "qqbot-" + Guid.NewGuid().ToString("N")
         };
-        Console.WriteLine("请在 PackingProof 弹出的窗口批准录像查询、下载和交付副本权限");
-        ExtensionCredentialState credential = await PackingProofClient.EnrollAsync(http, config, CancellationToken.None);
+        ExtensionCredentialState credential = await PackingProofClient.EnrollAsync(http, config, cancellationToken);
         store.Save(config, new QQBotSecrets { AppSecret = secret, ExtensionCredential = credential });
-        Console.WriteLine("配置已保存。接下来双击“启动机器人”，在私聊中向机器人发送一个单号；如已开通群聊能力，也可在目标群 @机器人发送一个单号");
-        return 0;
     }
 
     private static async Task<int> StartAsync(QQBotStateStore store)
@@ -83,17 +94,15 @@ internal static class Program
         return 0;
     }
 
-    private static async Task<int> RunAsync(QQBotStateStore store)
+    internal static async Task<int> RunAsync(QQBotStateStore store, CancellationToken cancellationToken = default)
     {
         QQBotConfiguration config = Config(store); QQBotSecrets secrets = Secrets(store);
         if (secrets.ExtensionCredential == null) throw new InvalidOperationException("缺少扩展凭据，请重新运行 --configure");
         using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(20) };
-        config = await ResolvePackingProofHostAsync(store, config, secrets, http, CancellationToken.None);
-        using var cancelled = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, eventArgs) => { eventArgs.Cancel = true; cancelled.Cancel(); };
+        config = await ResolvePackingProofHostAsync(store, config, secrets, http, cancellationToken);
         var service = new QueryService(config, new PackingProofClient(http, config, secrets.ExtensionCredential), new QQClient(http, config, secrets));
         Console.WriteLine("QQ 机器人已启动，按 Ctrl+C 停止");
-        await service.RunAsync(cancelled.Token);
+        await service.RunAsync(cancellationToken);
         return 0;
     }
 
@@ -135,6 +144,39 @@ internal static class Program
         Console.WriteLine(); return chars.Count > 0 ? new string(chars.ToArray()) : throw new InvalidDataException(label + "不能为空");
     }
     private static int Usage() { Console.WriteLine("请使用发布包中的“配置机器人”“启动机器人”“添加群白名单”和“视频发送设置”快捷方式"); return 0; }
+
+    private static int ShowWindow(QQBotStateStore store)
+    {
+        var application = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
+        application.Run(new QQBotManagerWindow(store));
+        return 0;
+    }
+
+    private static async Task<int> RunBackgroundAsync(QQBotStateStore store)
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var context = new System.Windows.Forms.ApplicationContext();
+        using var menu = new System.Windows.Forms.ContextMenuStrip();
+        menu.Items.Add("打开管理界面", null, (_, _) =>
+        {
+            string? executable = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executable)) return;
+            Process.Start(new ProcessStartInfo(executable) { UseShellExecute = true });
+        });
+        menu.Items.Add("退出 QQBot", null, (_, _) => { cancellation.Cancel(); context.ExitThread(); });
+        using var icon = new System.Windows.Forms.NotifyIcon
+        {
+            Text = "PackingProof QQBot",
+            ContextMenuStrip = menu,
+            Visible = true,
+            Icon = System.Drawing.SystemIcons.Application
+        };
+        Task run = RunAsync(store, cancellation.Token);
+        System.Windows.Forms.Application.Run(context);
+        try { await run; return 0; }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return 0; }
+        finally { icon.Visible = false; }
+    }
 }
 
 internal sealed class QueryService(QQBotConfiguration config, PackingProofClient packingProof, QQClient qq)
