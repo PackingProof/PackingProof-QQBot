@@ -78,6 +78,6 @@ public sealed class QQClientTests
 
         Assert.Contains("找到 3 段录像，本次先发送 2 段", summary, StringComparison.Ordinal);
         Assert.Contains("08-24 23:37｜1:05｜12.0 MB｜准备发送原片", summary, StringComparison.Ordinal);
-        Assert.Contains("08-24 23:39｜2:00｜220.0 MB｜需生成交付副本", summary, StringComparison.Ordinal);
+        Assert.Contains("08-24 23:39｜2:00｜220.0 MB｜将生成交付副本后发送", summary, StringComparison.Ordinal);
     }
 }
