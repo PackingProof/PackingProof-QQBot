@@ -51,8 +51,8 @@ internal sealed class PackingProofHostDiscovery(HttpClient http)
             using HttpResponseMessage response = await _http.GetAsync(new Uri(uri!, "/api/node-info"), cancellationToken);
             if (!response.IsSuccessStatusCode) return null;
             PackingProofHostInfo? node = await response.Content.ReadFromJsonAsync<PackingProofHostInfo>(cancellationToken: cancellationToken);
-            if (node?.IsValidHost != true) return null;
-            return node with { BaseUrl = new UriBuilder(uri.Scheme, uri.Host, node.HttpPort).Uri.AbsoluteUri.TrimEnd('/') };
+            if (node is not { IsValidHost: true } verified) return null;
+            return verified with { BaseUrl = new UriBuilder(uri.Scheme, uri.Host, verified.HttpPort).Uri.AbsoluteUri.TrimEnd('/') };
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException) { return null; }
     }
