@@ -39,4 +39,12 @@ public sealed class QQClientTests
         Assert.Equal(isGroup, message.IsGroup);
         Assert.Equal(recipientOpenid, message.RecipientOpenid);
     }
+
+    [Fact]
+    public void CalculateUploadOffsets_UsesActualPreviousPartSizes()
+    {
+        long[] offsets = QQClient.CalculateUploadOffsets([5 * 1024 * 1024, 5 * 1024 * 1024, 2 * 1024 * 1024]);
+
+        Assert.Equal(new long[] { 0, 5L * 1024 * 1024, 10L * 1024 * 1024 }, offsets);
+    }
 }

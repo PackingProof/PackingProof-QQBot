@@ -65,12 +65,16 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
         using JsonDocument preparationBody = await JsonDocument.ParseAsync(await prepared.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         EnsureSuccess(prepared, preparationBody, "准备 QQ 录像上传失败");
         string uploadId = preparationBody.RootElement.GetProperty("upload_id").GetString() ?? throw new InvalidDataException("QQ 上传任务为空");
-        foreach (JsonElement part in preparationBody.RootElement.GetProperty("parts").EnumerateArray().OrderBy(value => ReadRequiredInt32(value.GetProperty("index"), "QQ 上传分片序号")))
+        JsonElement[] parts = preparationBody.RootElement.GetProperty("parts").EnumerateArray().OrderBy(value => ReadRequiredInt32(value.GetProperty("index"), "QQ 上传分片序号")).ToArray();
+        int[] partSizes = parts.Select(value => checked((int)long.Parse(value.GetProperty("block_size").GetString()!))).ToArray();
+        long[] offsets = CalculateUploadOffsets(partSizes);
+        for (int position = 0; position < parts.Length; position++)
         {
+            JsonElement part = parts[position];
             int index = ReadRequiredInt32(part.GetProperty("index"), "QQ 上传分片序号");
-            int size = checked((int)long.Parse(part.GetProperty("block_size").GetString()!));
+            int size = partSizes[position];
             string url = part.GetProperty("presigned_url").GetString() ?? throw new InvalidDataException("QQ 分片地址为空");
-            byte[] bytes = await ReadPartAsync(filePath, (long)index * size, size, cancellationToken);
+            byte[] bytes = await ReadPartAsync(filePath, offsets[position], size, cancellationToken);
             using (var put = new HttpRequestMessage(HttpMethod.Put, url) { Content = new ByteArrayContent(bytes) })
             using (HttpResponseMessage uploaded = await _http.SendAsync(put, cancellationToken))
                 if (!uploaded.IsSuccessStatusCode) throw new InvalidOperationException($"上传 QQ 录像分片失败（HTTP {(int)uploaded.StatusCode}）");
@@ -199,6 +203,19 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
             return number;
         }
         throw new InvalidDataException($"{fieldName}格式无效");
+    }
+
+    internal static long[] CalculateUploadOffsets(IReadOnlyList<int> partSizes)
+    {
+        var offsets = new long[partSizes.Count];
+        long offset = 0;
+        for (int index = 0; index < partSizes.Count; index++)
+        {
+            if (partSizes[index] < 0) throw new ArgumentOutOfRangeException(nameof(partSizes), "QQ 上传分片大小不能为负数");
+            offsets[index] = offset;
+            offset = checked(offset + partSizes[index]);
+        }
+        return offsets;
     }
 
     private static async Task<byte[]> ReadPartAsync(string path, long offset, int capacity, CancellationToken cancellationToken)
