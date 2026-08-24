@@ -166,6 +166,8 @@ public sealed class RecordingQuery
     public string QueryId { get; init; } = "";
     public string Status { get; init; } = "";
     public string Message { get; init; } = "";
+    public int TotalMatches { get; init; }
+    public bool Truncated { get; init; }
     public Recording[] Recordings { get; init; } = [];
 }
 
@@ -173,6 +175,7 @@ public sealed class Recording
 {
     public long RecordingId { get; init; }
     public string Status { get; init; } = "";
+    public DateTime RecordedAt { get; init; }
     public long FileSizeBytes { get; init; }
     public double DurationSeconds { get; init; }
     public string VideoCodec { get; init; } = "";

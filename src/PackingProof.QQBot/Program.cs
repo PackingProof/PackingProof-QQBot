@@ -120,10 +120,18 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
         await qq.SendTextAsync(message, $"正在查询单号 {number} 的录像", message.Id, 1, cancellationToken);
         RecordingQuery query = await packingProof.CreateQueryAsync(number, cancellationToken);
         while (query.Status is "queued" or "searching" or "preparing") { await Task.Delay(1000, cancellationToken); query = await packingProof.GetQueryAsync(query.QueryId, cancellationToken); }
-        if (query.Status == "not_found") { await qq.SendTextAsync(message, $"未找到单号 {number} 的精确匹配录像", message.Id, 2, cancellationToken); return; }
+        if (query.Status == "not_found") { await qq.SendTextAsync(message, $"未找到单号 {number} 的关联录像", message.Id, 2, cancellationToken); return; }
         if (query.Status is not ("ready" or "completed")) { await qq.SendTextAsync(message, string.IsNullOrWhiteSpace(query.Message) ? "录像查询失败" : query.Message, message.Id, 2, cancellationToken); return; }
-        int sequence = 2;
-        foreach (Recording recording in query.Recordings.Where(item => item.Status == "ready" && item.DownloadUrl != null).Take(3))
+        Recording[] recordings = query.Recordings.Where(item => item.Status == "ready" && item.DownloadUrl != null).Take(3).ToArray();
+        if (recordings.Length == 0)
+        {
+            await qq.SendTextAsync(message, "已找到录像，但当前没有可发送的文件，请稍后重试", message.Id, 2, cancellationToken);
+            return;
+        }
+
+        await qq.SendTextAsync(message, BuildRecordingSummary(number, query, recordings, config.DeliveryMaxSizeMb), message.Id, 2, cancellationToken);
+        int sequence = 3;
+        foreach (Recording recording in recordings)
         {
             bool requiresDelivery = recording.FileSizeBytes > config.DeliveryMaxSizeMb * 1024L * 1024L;
             RecordingDelivery? delivery = null;
@@ -178,6 +186,32 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
 
     private static string FormatMegabytes(long bytes) => $"{bytes / 1024d / 1024d:0.0} MB";
     private static string FormatDuration(double seconds) => TimeSpan.FromSeconds(Math.Max(0, seconds)).ToString(@"m\:ss");
+
+    internal static string BuildRecordingSummary(
+        string trackingNumber,
+        RecordingQuery query,
+        IReadOnlyList<Recording> recordings,
+        int deliveryMaxSizeMb)
+    {
+        int total = Math.Max(query.TotalMatches, query.Recordings.Length);
+        string prefix = $"单号 {trackingNumber} 找到 {total} 段录像";
+        if (total > recordings.Count || query.Truncated)
+            prefix += $"，本次先发送 {recordings.Count} 段";
+
+        var lines = new List<string> { prefix + "：" };
+        for (int index = 0; index < recordings.Count; index++)
+        {
+            Recording recording = recordings[index];
+            string recordedAt = recording.RecordedAt == default
+                ? "时间未知"
+                : recording.RecordedAt.ToString("MM-dd HH:mm");
+            string delivery = recording.FileSizeBytes > deliveryMaxSizeMb * 1024L * 1024L
+                ? "需生成交付副本"
+                : "准备发送原片";
+            lines.Add($"{index + 1}. {recordedAt}｜{FormatDuration(recording.DurationSeconds)}｜{FormatMegabytes(recording.FileSizeBytes)}｜{delivery}");
+        }
+        return string.Join('\n', lines);
+    }
 
     private static string DeliveryFailureText(string errorCode) => errorCode switch
     {

@@ -47,4 +47,37 @@ public sealed class QQClientTests
 
         Assert.Equal(new long[] { 0, 5L * 1024 * 1024, 10L * 1024 * 1024 }, offsets);
     }
+
+    [Fact]
+    public void BuildRecordingSummary_ShowsCountDateDurationAndSizeBeforeUpload()
+    {
+        var recordings = new[]
+        {
+            new Recording
+            {
+                RecordingId = 1,
+                RecordedAt = new DateTime(2026, 8, 24, 23, 37, 0),
+                DurationSeconds = 65,
+                FileSizeBytes = 12L * 1024 * 1024,
+                Status = "ready",
+                DownloadUrl = "/download"
+            },
+            new Recording
+            {
+                RecordingId = 2,
+                RecordedAt = new DateTime(2026, 8, 24, 23, 39, 0),
+                DurationSeconds = 120,
+                FileSizeBytes = 220L * 1024 * 1024,
+                Status = "ready",
+                DownloadUrl = "/download"
+            }
+        };
+        var query = new RecordingQuery { TotalMatches = 3, Recordings = recordings };
+
+        string summary = QueryService.BuildRecordingSummary("6974412900385", query, recordings, 190);
+
+        Assert.Contains("找到 3 段录像，本次先发送 2 段", summary, StringComparison.Ordinal);
+        Assert.Contains("08-24 23:37｜1:05｜12.0 MB｜准备发送原片", summary, StringComparison.Ordinal);
+        Assert.Contains("08-24 23:39｜2:00｜220.0 MB｜需生成交付副本", summary, StringComparison.Ordinal);
+    }
 }
