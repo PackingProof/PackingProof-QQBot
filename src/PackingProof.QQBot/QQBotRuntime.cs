@@ -31,6 +31,20 @@ internal sealed class QQBotRuntime(QQBotStateStore store) : IDisposable
 
     public void Stop() => _cancellation?.Cancel();
 
+    public async Task RestartAsync()
+    {
+        Task? previous;
+        lock (_gate) previous = _runTask is { IsCompleted: false } ? _runTask : null;
+        Stop();
+        if (previous != null)
+        {
+            try { await previous; }
+            catch (OperationCanceledException) { }
+            catch { }
+        }
+        Start();
+    }
+
     private async Task RunCoreAsync(CancellationToken cancellationToken)
     {
         QQBotConfiguration configuration = Program.Config(_store);

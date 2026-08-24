@@ -119,7 +119,7 @@ internal sealed class QQBotManagerWindow : Window
             SetStatus("正在请求 PackingProof 授权，请在主程序窗口中批准");
             await Program.SaveConfigurationAsync(_store, _appId.Text.Trim(), _appSecret.Password, _host.Text.Trim(), CancellationToken.None);
             Load();
-            _runtime.Start();
+            await _runtime.RestartAsync();
             SetStatus("配置已保存，正在启动机器人");
         }
         catch (Exception exception) { SetStatus(exception.Message); }

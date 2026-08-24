@@ -28,6 +28,8 @@ internal sealed record PackingProofHostInfo
         && nodeId != Guid.Empty
         && HttpPort is > 0 and <= 65535
         && Capabilities.Contains("host", StringComparer.OrdinalIgnoreCase);
+
+    public override string ToString() => $"{NodeName}｜{BaseUrl}｜{NodeId}";
 }
 
 /// <summary>

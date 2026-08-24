@@ -139,8 +139,13 @@ internal static class Program
     }
     private static int RunManager(QQBotStateStore store)
     {
-        if (QQBotSingleInstance.TryActivateExisting()) return 0;
-        using var host = new QQBotApplicationHost(store, false, null);
+        using var singleInstance = new QQBotSingleInstance();
+        if (!singleInstance.TryAcquire())
+        {
+            QQBotSingleInstance.TryActivateExisting();
+            return 0;
+        }
+        using var host = new QQBotApplicationHost(store, false, singleInstance.ActivationEvent);
         return host.Run();
     }
 
