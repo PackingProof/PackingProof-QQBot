@@ -49,7 +49,7 @@ public sealed class QQClientTests
     }
 
     [Fact]
-    public void BuildRecordingSummary_ShowsCountDateDurationAndSizeBeforeUpload()
+    public void BuildRecordingSummary_ShowsCountDateDurationSizeAndContinuePromptBeforeUpload()
     {
         var recordings = new[]
         {
@@ -74,9 +74,9 @@ public sealed class QQClientTests
         };
         var query = new RecordingQuery { TotalMatches = 3, Recordings = recordings };
 
-        string summary = QueryService.BuildRecordingSummary("6974412900385", query, recordings, 190);
+        string summary = QueryService.BuildRecordingSummary("6974412900385", query, recordings, 190, remainingCount: 1);
 
-        Assert.Contains("找到 3 段录像，本次先发送 2 段", summary, StringComparison.Ordinal);
+        Assert.Contains("找到 3 段录像，本次发送 2 段，还剩 1 段。回复“继续”即可发送下一批", summary, StringComparison.Ordinal);
         Assert.Contains("08-24 23:37｜1:05｜12.0 MB｜准备发送原片", summary, StringComparison.Ordinal);
         Assert.Contains("08-24 23:39｜2:00｜220.0 MB｜将生成交付副本后发送", summary, StringComparison.Ordinal);
     }
