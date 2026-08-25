@@ -168,11 +168,129 @@ public sealed class QQClientTests
         }
     }
 
+    [Fact]
+    public async Task MultipleTrackingNumbers_ShareOneAcknowledgementAndOneResultSummary()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "PackingProof-QQBot-Test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var configuration = new QQBotConfiguration
+            {
+                AppId = "app",
+                PackingProofBaseUrl = "http://packingproof:5280",
+                ExtensionInstanceId = "qqbot-test"
+            };
+            var secrets = new QQBotSecrets { AppSecret = "secret" };
+            var store = new QQBotStateStore(directory);
+            store.Save(configuration, secrets);
+            var handler = new QQReplyHandler();
+            using var http = new HttpClient(handler);
+            var service = new QueryService(
+                configuration,
+                new PackingProofClient(http, configuration, new ExtensionCredentialState
+                {
+                    ExtensionInstanceId = "qqbot-test",
+                    Credential = new string('a', 64),
+                    CredentialGeneration = 1
+                }),
+                new QQClient(http, configuration, secrets),
+                store);
+
+            await service.HandleAsync(
+                new QQIncomingMessage("message-3", "SF123456，YT123456", "user-first", false),
+                CancellationToken.None);
+
+            Assert.Equal(2, handler.DirectMessageBodies.Count);
+            using JsonDocument acknowledgement = JsonDocument.Parse(handler.DirectMessageBodies[0]);
+            using JsonDocument summary = JsonDocument.Parse(handler.DirectMessageBodies[1]);
+            Assert.Equal("已识别 2 个单号，正在查询录像", acknowledgement.RootElement.GetProperty("content").GetString());
+            Assert.Equal(1, acknowledgement.RootElement.GetProperty("msg_seq").GetInt32());
+            Assert.Contains("SF123456：未找到关联录像", summary.RootElement.GetProperty("content").GetString(), StringComparison.Ordinal);
+            Assert.Contains("YT123456：未找到关联录像", summary.RootElement.GetProperty("content").GetString(), StringComparison.Ordinal);
+            Assert.Equal(2, summary.RootElement.GetProperty("msg_seq").GetInt32());
+            Assert.Equal(2, handler.QueryRequestCount);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MultipleTrackingNumbers_StayWithinFiveRepliesAndContinueRemainingRecordings()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "PackingProof-QQBot-Test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var configuration = new QQBotConfiguration
+            {
+                AppId = "app",
+                PackingProofBaseUrl = "http://packingproof:5280",
+                ExtensionInstanceId = "qqbot-test"
+            };
+            var secrets = new QQBotSecrets { AppSecret = "secret" };
+            var store = new QQBotStateStore(directory);
+            store.Save(configuration, secrets);
+            var handler = new QQReplyHandler(returnReadyRecordings: true);
+            using var http = new HttpClient(handler);
+            var service = new QueryService(
+                configuration,
+                new PackingProofClient(http, configuration, new ExtensionCredentialState
+                {
+                    ExtensionInstanceId = "qqbot-test",
+                    Credential = new string('a', 64),
+                    CredentialGeneration = 1
+                }),
+                new QQClient(http, configuration, secrets),
+                store);
+
+            await service.HandleAsync(
+                new QQIncomingMessage("message-4", "SF123456 YT123456 JD123456 EMS123456", "user-first", false),
+                CancellationToken.None);
+
+            Assert.Equal(5, handler.DirectMessageBodies.Count);
+            Assert.Equal([1, 2, 3, 4, 5], handler.DirectMessageBodies.Select(ReadMessageSequence));
+            Assert.Contains("还剩 1 段", ReadMessageContent(handler.DirectMessageBodies[1]), StringComparison.Ordinal);
+
+            await service.HandleAsync(
+                new QQIncomingMessage("message-5", "继续", "user-first", false),
+                CancellationToken.None);
+
+            Assert.Equal(7, handler.DirectMessageBodies.Count);
+            Assert.Equal(1, ReadMessageSequence(handler.DirectMessageBodies[5]));
+            Assert.Contains("继续发送 1 段", ReadMessageContent(handler.DirectMessageBodies[5]), StringComparison.Ordinal);
+            Assert.Equal(2, ReadMessageSequence(handler.DirectMessageBodies[6]));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static int ReadMessageSequence(string body)
+    {
+        using JsonDocument document = JsonDocument.Parse(body);
+        return document.RootElement.GetProperty("msg_seq").GetInt32();
+    }
+
+    private static string ReadMessageContent(string body)
+    {
+        using JsonDocument document = JsonDocument.Parse(body);
+        return document.RootElement.GetProperty("content").GetString() ?? "";
+    }
+
     private sealed class QQReplyHandler : HttpMessageHandler
     {
+        private readonly bool _returnReadyRecordings;
+        private int _queryRequestCount;
+
+        public QQReplyHandler(bool returnReadyRecordings = false) => _returnReadyRecordings = returnReadyRecordings;
+
         public int GroupReplyCount { get; private set; }
         public string LastMessageBody { get; private set; } = "";
         public List<string> GroupMessageBodies { get; } = [];
+        public List<string> DirectMessageBodies { get; } = [];
+        public int QueryRequestCount => Volatile.Read(ref _queryRequestCount);
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -196,7 +314,29 @@ public sealed class QQClientTests
             }
 
             if (request.RequestUri.AbsolutePath == "/api/extensions/v1/recording-queries")
+            {
+                Interlocked.Increment(ref _queryRequestCount);
+                if (_returnReadyRecordings)
+                    return Json(HttpStatusCode.OK, "{\"queryId\":\"query-1\",\"status\":\"ready\",\"totalMatches\":1,\"recordings\":[{\"recordingId\":1,\"status\":\"ready\",\"recordedAt\":\"2026-08-24T23:37:00\",\"fileSizeBytes\":1,\"durationSeconds\":1,\"videoCodec\":\"h264\",\"fileName\":\"recording.mp4\",\"downloadUrl\":\"/download\"}]}");
                 return Json(HttpStatusCode.OK, "{\"queryId\":\"query-1\",\"status\":\"not_found\",\"recordings\":[]}");
+            }
+
+            if (request.RequestUri.AbsolutePath.EndsWith("/download", StringComparison.Ordinal))
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1]) };
+
+            if (request.RequestUri.AbsolutePath == "/v2/users/user-first/upload_prepare")
+                return Json(HttpStatusCode.OK, "{\"upload_id\":\"upload-1\",\"parts\":[]}");
+
+            if (request.RequestUri.AbsolutePath == "/v2/users/user-first/files")
+                return Json(HttpStatusCode.OK, "{\"file_info\":\"file-1\"}");
+
+            if (request.RequestUri.AbsolutePath == "/v2/users/user-first/messages")
+            {
+                DirectMessageBodies.Add(request.Content == null
+                    ? ""
+                    : await request.Content.ReadAsStringAsync(cancellationToken));
+                return Json(HttpStatusCode.OK, "{}");
+            }
 
             return Json(HttpStatusCode.NotFound, "{}");
         }
