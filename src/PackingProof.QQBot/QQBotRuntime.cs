@@ -63,7 +63,7 @@ internal sealed class QQBotRuntime(QQBotStateStore store) : IDisposable
         });
 
         PublishStatus("正在连接 QQ 网关");
-        var service = new QueryService(configuration, packingProof, new QQClient(http, configuration, secrets));
+        var service = new QueryService(configuration, packingProof, new QQClient(http, configuration, secrets), _store);
         await service.RunAsync(cancellationToken);
     }
 

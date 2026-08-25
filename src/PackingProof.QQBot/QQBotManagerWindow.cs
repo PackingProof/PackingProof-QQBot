@@ -5,6 +5,7 @@ using WpfButton = System.Windows.Controls.Button;
 using WpfComboBox = System.Windows.Controls.ComboBox;
 using WpfControl = System.Windows.Controls.Control;
 using WpfColumnDefinition = System.Windows.Controls.ColumnDefinition;
+using WpfClipboard = System.Windows.Clipboard;
 using WpfGrid = System.Windows.Controls.Grid;
 using WpfListBox = System.Windows.Controls.ListBox;
 using WpfPanel = System.Windows.Controls.Panel;
@@ -25,7 +26,6 @@ internal sealed class QQBotManagerWindow : Window
     private readonly WpfTextBox _appId = new();
     private readonly WpfPasswordBox _appSecret = new();
     private readonly WpfTextBox _host = new();
-    private readonly WpfTextBox _groupOpenId = new();
     private readonly WpfListBox _groups = new();
     private readonly WpfTextBox _size = new();
     private readonly WpfComboBox _profile = new();
@@ -51,10 +51,12 @@ internal sealed class QQBotManagerWindow : Window
         Content = BuildContent();
         Load();
         _runtime.StatusChanged += OnRuntimeStatusChanged;
+        _store.GroupsChanged += OnGroupsChanged;
         QQBotLog.Written += OnLogWritten;
         Closed += (_, _) =>
         {
             _runtime.StatusChanged -= OnRuntimeStatusChanged;
+            _store.GroupsChanged -= OnGroupsChanged;
             QQBotLog.Written -= OnLogWritten;
         };
     }
@@ -102,21 +104,26 @@ internal sealed class QQBotManagerWindow : Window
         panel.Children.Add(Card("连接与授权", connection));
 
         var groups = FormGrid(2);
-        _groups.MaxHeight = 100;
+        _groups.MaxHeight = 130;
         _groups.Margin = new Thickness(0, 0, 0, 8);
         WpfGrid.SetColumnSpan(_groups, 2);
         groups.Children.Add(_groups);
-        _groupOpenId.MinWidth = 330;
-        _groupOpenId.Height = 32;
-        _groupOpenId.VerticalContentAlignment = VerticalAlignment.Center;
-        var groupLabel = Label("群 OpenID");
-        WpfGrid.SetRow(groupLabel, 1);
-        groups.Children.Add(groupLabel);
-        WpfStackPanel groupActions = Row(_groupOpenId, PrimaryButton("添加到白名单", AddGroup), Button("删除选中", RemoveGroup));
+        var groupHint = new WpfTextBlock
+        {
+            Text = "在群里 @ 机器人后会自动显示。选择群后决定是否允许使用",
+            Foreground = Brush(100, 116, 139),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        WpfGrid.SetRow(groupHint, 1);
+        groups.Children.Add(groupHint);
+        WpfStackPanel groupActions = Row(
+            PrimaryButton("允许选中群", AllowSelectedGroup),
+            Button("停用选中群", DisableSelectedGroup),
+            Button("复制 OpenID", CopySelectedGroupOpenId));
         WpfGrid.SetRow(groupActions, 1);
         WpfGrid.SetColumn(groupActions, 1);
         groups.Children.Add(groupActions);
-        panel.Children.Add(Card("QQ 群白名单", groups));
+        panel.Children.Add(Card("发现的 QQ 群", groups));
 
         var delivery = FormGrid(1);
         _profile.Items.Add("保持原编码并降低码率");
@@ -136,7 +143,10 @@ internal sealed class QQBotManagerWindow : Window
 
         _logs.MaxHeight = 160;
         _logs.Background = Brush(248, 250, 252);
-        panel.Children.Add(Card("运行日志", _logs));
+        var logPanel = new WpfStackPanel();
+        logPanel.Children.Add(_logs);
+        logPanel.Children.Add(Row(Button("复制选中日志", CopySelectedLog)));
+        panel.Children.Add(Card("运行日志", logPanel));
         return new WpfScrollViewer { Content = panel, VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto, Background = Brush(245, 247, 250) };
     }
 
@@ -228,7 +238,10 @@ internal sealed class QQBotManagerWindow : Window
 
     private void RefreshGroups(QQBotConfiguration? config = null)
     {
-        _groups.ItemsSource = (config ?? _store.LoadConfiguration())?.AllowedGroupOpenIds ?? [];
+        string? selectedOpenId = (_groups.SelectedItem as QQGroupDisplayItem)?.OpenId;
+        QQGroupDisplayItem[] items = BuildGroupItems(config ?? _store.LoadConfiguration());
+        _groups.ItemsSource = items;
+        _groups.SelectedItem = items.FirstOrDefault(item => string.Equals(item.OpenId, selectedOpenId, StringComparison.Ordinal));
     }
 
     private async void SaveAsync(object sender, RoutedEventArgs eventArgs)
@@ -277,21 +290,34 @@ internal sealed class QQBotManagerWindow : Window
         SetStatus("已选择新主机。为保护录像权限，请点击“保存并授权”完成确认");
     }
 
-    private void AddGroup(object sender, RoutedEventArgs eventArgs)
+    private void AllowSelectedGroup(object sender, RoutedEventArgs eventArgs)
     {
-        QQBotConfiguration config = RequireConfig(); QQBotSecrets secrets = RequireSecrets();
-        string group = _groupOpenId.Text.Trim();
-        if (group.Length == 0) { SetStatus("请输入群 OpenID"); return; }
-        config = config with { AllowedGroupOpenIds = config.AllowedGroupOpenIds.Append(group).Distinct(StringComparer.Ordinal).Order().ToArray() };
-        _store.Save(config, secrets); _groupOpenId.Clear(); RefreshGroups(config); SetStatus("已加入群白名单");
+        if (_groups.SelectedItem is not QQGroupDisplayItem group) { SetStatus("请先选择一个群"); return; }
+        QQBotConfiguration config = _store.SetGroupAllowed(group.OpenId, true);
+        RefreshGroups(config);
+        SetStatus("已允许该群，立即生效");
     }
 
-    private void RemoveGroup(object sender, RoutedEventArgs eventArgs)
+    private void DisableSelectedGroup(object sender, RoutedEventArgs eventArgs)
     {
-        if (_groups.SelectedItem is not string group) return;
-        QQBotConfiguration config = RequireConfig();
-        config = config with { AllowedGroupOpenIds = config.AllowedGroupOpenIds.Where(item => item != group).ToArray() };
-        _store.Save(config, RequireSecrets()); RefreshGroups(config); SetStatus("已删除群白名单");
+        if (_groups.SelectedItem is not QQGroupDisplayItem group) { SetStatus("请先选择一个群"); return; }
+        QQBotConfiguration config = _store.SetGroupAllowed(group.OpenId, false);
+        RefreshGroups(config);
+        SetStatus("已停用该群，立即生效");
+    }
+
+    private void CopySelectedGroupOpenId(object sender, RoutedEventArgs eventArgs)
+    {
+        if (_groups.SelectedItem is not QQGroupDisplayItem group) { SetStatus("请先选择一个群"); return; }
+        try { WpfClipboard.SetText(group.OpenId); SetStatus("群 OpenID 已复制"); }
+        catch (Exception exception) { SetStatus("复制失败：" + exception.Message); }
+    }
+
+    private void CopySelectedLog(object sender, RoutedEventArgs eventArgs)
+    {
+        if (_logs.SelectedItem is not string entry) { SetStatus("请先选择一条日志"); return; }
+        try { WpfClipboard.SetText(entry); SetStatus("日志已复制"); }
+        catch (Exception exception) { SetStatus("复制失败：" + exception.Message); }
     }
 
     private void SaveDelivery(object sender, RoutedEventArgs eventArgs)
@@ -334,6 +360,7 @@ internal sealed class QQBotManagerWindow : Window
     }
     private static string FormatHost(PackingProofHostInfo host) => $"主机：{host.NodeName}｜地址：{host.BaseUrl}";
     private void OnRuntimeStatusChanged(string status) => Dispatcher.BeginInvoke(() => SetStatus(status));
+    private void OnGroupsChanged() => Dispatcher.BeginInvoke(RefreshGroups);
     private void OnLogWritten(string entry) => Dispatcher.BeginInvoke(() =>
     {
         _logs.Items.Add(entry);
@@ -344,6 +371,32 @@ internal sealed class QQBotManagerWindow : Window
     {
         _status.Text = $"{DateTime.Now:HH:mm:ss} {text}";
     }
+
+    internal static QQGroupDisplayItem[] BuildGroupItems(QQBotConfiguration? config)
+    {
+        if (config == null) return [];
+        var known = config.KnownGroups
+            .Where(group => !string.IsNullOrWhiteSpace(group.OpenId))
+            .GroupBy(group => group.OpenId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.OrderByDescending(item => item.LastSeenAtUtc).First(), StringComparer.Ordinal);
+        return known.Keys
+            .Concat(config.AllowedGroupOpenIds)
+            .Where(openId => !string.IsNullOrWhiteSpace(openId))
+            .Distinct(StringComparer.Ordinal)
+            .Select(openId => new QQGroupDisplayItem(
+                openId,
+                config.AllowedGroupOpenIds.Contains(openId, StringComparer.Ordinal),
+                known.TryGetValue(openId, out QQKnownGroup? group) ? group.LastSeenAtUtc : null))
+            .OrderByDescending(item => item.LastSeenAtUtc ?? DateTimeOffset.MinValue)
+            .ThenBy(item => item.OpenId, StringComparer.Ordinal)
+            .ToArray();
+    }
+}
+
+internal sealed record QQGroupDisplayItem(string OpenId, bool IsAllowed, DateTimeOffset? LastSeenAtUtc)
+{
+    public override string ToString() =>
+        $"{(IsAllowed ? "已允许" : "未允许")}｜{OpenId}｜{(LastSeenAtUtc.HasValue ? "最后出现 " + LastSeenAtUtc.Value.ToLocalTime().ToString("MM-dd HH:mm") : "出现时间未知")}";
 }
 
 internal static class WpfControlExtensions

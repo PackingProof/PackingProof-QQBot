@@ -59,6 +59,7 @@ internal static class Program
             PackingProofNodeName = packingProofHost.NodeName,
             ExtensionInstanceId = string.IsNullOrWhiteSpace(existing?.ExtensionInstanceId) ? "qqbot-" + Guid.NewGuid().ToString("N") : existing.ExtensionInstanceId,
             AllowedGroupOpenIds = existing?.AllowedGroupOpenIds ?? [],
+            KnownGroups = existing?.KnownGroups ?? [],
             DeliveryMaxSizeMb = existing?.DeliveryMaxSizeMb ?? QQBotConfiguration.DefaultDeliveryMaxSizeMb,
             DeliveryProfile = existing?.DeliveryProfile ?? QQBotConfiguration.SourceCodecTargetSizeProfile,
             StartWithWindows = existing?.StartWithWindows ?? false
@@ -102,7 +103,7 @@ internal static class Program
         if (secrets.ExtensionCredential == null) throw new InvalidOperationException("缺少扩展凭据，请重新运行 --configure");
         using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(20) };
         config = await ResolvePackingProofHostAsync(store, config, secrets, http, cancellationToken);
-        var service = new QueryService(config, new PackingProofClient(http, config, secrets.ExtensionCredential), new QQClient(http, config, secrets));
+        var service = new QueryService(config, new PackingProofClient(http, config, secrets.ExtensionCredential), new QQClient(http, config, secrets), store);
         Console.WriteLine("QQ 机器人已启动，按 Ctrl+C 停止");
         await service.RunAsync(cancellationToken);
         return 0;
@@ -170,7 +171,7 @@ internal static class Program
     }
 }
 
-internal sealed class QueryService(QQBotConfiguration config, PackingProofClient packingProof, QQClient qq)
+internal sealed class QueryService(QQBotConfiguration config, PackingProofClient packingProof, QQClient qq, QQBotStateStore? store = null)
 {
     private const int RecordingsPerReplyBatch = 3;
     private readonly ConcurrentDictionary<string, byte> _handled = new(StringComparer.Ordinal);
@@ -178,12 +179,21 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
 
     public Task RunAsync(CancellationToken cancellationToken) => qq.RunGatewayAsync(HandleAsync, cancellationToken);
 
-    private async Task HandleAsync(QQIncomingMessage message, CancellationToken cancellationToken)
+    internal async Task HandleAsync(QQIncomingMessage message, CancellationToken cancellationToken)
     {
         if (!_handled.TryAdd(message.Id, 0)) return;
-        if (message.IsGroup && !config.AllowedGroupOpenIds.Contains(message.RecipientOpenid, StringComparer.Ordinal))
+        QQBotConfiguration currentConfig = message.IsGroup && store != null
+            ? store.RecordGroupSeen(message.RecipientOpenid, DateTimeOffset.UtcNow)
+            : config;
+        if (message.IsGroup && !currentConfig.AllowedGroupOpenIds.Contains(message.RecipientOpenid, StringComparer.Ordinal))
         {
-            QQBotLog.Write($"发现未授权群，请在管理器的白名单中添加群 OpenID：{message.RecipientOpenid}");
+            QQBotLog.Write($"群尚未允许，已在管理器中显示：{message.RecipientOpenid}");
+            await qq.SendTextAsync(
+                message,
+                "已收到群消息，但这个群尚未允许使用。请在 QQBot 管理器的“发现的 QQ 群”中开启",
+                message.Id,
+                1,
+                cancellationToken);
             return;
         }
         if (string.Equals(message.Content.Trim(), "继续", StringComparison.Ordinal))

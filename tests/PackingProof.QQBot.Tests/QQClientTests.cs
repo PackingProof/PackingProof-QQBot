@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Net;
+using System.Text;
 using PackingProof.QQBot;
 
 namespace PackingProof.QQBot.Tests;
@@ -79,5 +81,79 @@ public sealed class QQClientTests
         Assert.Contains("找到 3 段录像，本次发送 2 段，还剩 1 段。回复“继续”即可发送下一批", summary, StringComparison.Ordinal);
         Assert.Contains("08-24 23:37｜1:05｜12.0 MB｜准备发送原片", summary, StringComparison.Ordinal);
         Assert.Contains("08-24 23:39｜2:00｜220.0 MB｜将生成交付副本后发送", summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FirstGroupMessage_IsRecordedAndReceivesPermissionPromptWithoutPrivateMessage()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "PackingProof-QQBot-Test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var configuration = new QQBotConfiguration
+            {
+                AppId = "app",
+                PackingProofBaseUrl = "http://packingproof:5280",
+                ExtensionInstanceId = "qqbot-test"
+            };
+            var secrets = new QQBotSecrets { AppSecret = "secret" };
+            var store = new QQBotStateStore(directory);
+            store.Save(configuration, secrets);
+            var handler = new QQReplyHandler();
+            using var http = new HttpClient(handler);
+            var qq = new QQClient(http, configuration, secrets);
+            var packingProof = new PackingProofClient(http, configuration, new ExtensionCredentialState
+            {
+                ExtensionInstanceId = "qqbot-test",
+                Credential = new string('a', 64),
+                CredentialGeneration = 1
+            });
+            var service = new QueryService(configuration, packingProof, qq, store);
+
+            await service.HandleAsync(
+                new QQIncomingMessage("message-1", "SF123456", "group-first", true),
+                CancellationToken.None);
+
+            Assert.Contains(store.LoadConfiguration()!.KnownGroups, group => group.OpenId == "group-first");
+            Assert.Contains("这个群尚未允许使用", handler.LastMessageBody, StringComparison.Ordinal);
+            Assert.Equal(1, handler.GroupReplyCount);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private sealed class QQReplyHandler : HttpMessageHandler
+    {
+        public int GroupReplyCount { get; private set; }
+        public string LastMessageBody { get; private set; } = "";
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            if (request.RequestUri!.AbsoluteUri.Contains("/app/getAppAccessToken", StringComparison.Ordinal))
+            {
+                return Json(HttpStatusCode.OK, "{\"access_token\":\"token\",\"expires_in\":3600}");
+            }
+
+            if (request.RequestUri.AbsolutePath == "/v2/groups/group-first/messages")
+            {
+                GroupReplyCount++;
+                string body = request.Content == null
+                    ? ""
+                    : await request.Content.ReadAsStringAsync(cancellationToken);
+                using JsonDocument payload = JsonDocument.Parse(body);
+                LastMessageBody = payload.RootElement.GetProperty("content").GetString() ?? "";
+                return Json(HttpStatusCode.OK, "{}");
+            }
+
+            return Json(HttpStatusCode.NotFound, "{}");
+        }
+
+        private static HttpResponseMessage Json(HttpStatusCode statusCode, string body) => new(statusCode)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json")
+        };
     }
 }

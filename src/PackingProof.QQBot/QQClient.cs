@@ -122,7 +122,7 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
                 string eventType = type.GetString() ?? "";
                 if (string.Equals(eventType, "READY", StringComparison.Ordinal))
                 {
-                    QQBotLog.Write("QQ 网关已连接，机器人在线");
+                    QQBotLog.Write("QQ 网关已连接，已订阅私聊和群 @ 消息");
                     continue;
                 }
                 if (!payload.RootElement.TryGetProperty("d", out JsonElement body))
