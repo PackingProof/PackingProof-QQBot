@@ -212,18 +212,19 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
             return;
         }
         QQBotLog.Write($"已识别单号 {number}，正在查询 PackingProof");
+        await qq.SendTextAsync(message, $"正在查询单号 {number} 的录像", message.Id, 1, cancellationToken);
         RecordingQuery query = await packingProof.CreateQueryAsync(number, cancellationToken);
         while (query.Status is "queued" or "searching" or "preparing") { await Task.Delay(1000, cancellationToken); query = await packingProof.GetQueryAsync(query.QueryId, cancellationToken); }
-        if (query.Status == "not_found") { await qq.SendTextAsync(message, $"未找到单号 {number} 的关联录像", message.Id, 1, cancellationToken); return; }
-        if (query.Status is not ("ready" or "completed")) { await qq.SendTextAsync(message, string.IsNullOrWhiteSpace(query.Message) ? "录像查询失败" : query.Message, message.Id, 1, cancellationToken); return; }
+        if (query.Status == "not_found") { await qq.SendTextAsync(message, $"未找到单号 {number} 的关联录像", message.Id, 2, cancellationToken); return; }
+        if (query.Status is not ("ready" or "completed")) { await qq.SendTextAsync(message, string.IsNullOrWhiteSpace(query.Message) ? "录像查询失败" : query.Message, message.Id, 2, cancellationToken); return; }
         Recording[] recordings = GetSendableRecordings(query);
         if (recordings.Length == 0)
         {
-            await qq.SendTextAsync(message, "已找到录像，但当前没有可发送的文件，请稍后重试", message.Id, 1, cancellationToken);
+            await qq.SendTextAsync(message, "已找到录像，但当前没有可发送的文件，请稍后重试", message.Id, 2, cancellationToken);
             return;
         }
 
-        int nextIndex = await SendRecordingBatchAsync(message, number, query, recordings, 0, cancellationToken);
+        int nextIndex = await SendRecordingBatchAsync(message, number, query, recordings, 0, 2, cancellationToken);
         SavePendingBatch(message, number, query.QueryId, recordings.Length, nextIndex);
     }
 
@@ -253,7 +254,7 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
             return;
         }
 
-        int nextIndex = await SendRecordingBatchAsync(message, pending.TrackingNumber, query, recordings, pending.NextIndex, cancellationToken);
+        int nextIndex = await SendRecordingBatchAsync(message, pending.TrackingNumber, query, recordings, pending.NextIndex, 1, cancellationToken);
         SavePendingBatch(message, pending.TrackingNumber, pending.QueryId, recordings.Length, nextIndex);
     }
 
@@ -263,13 +264,14 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
         RecordingQuery query,
         IReadOnlyList<Recording> recordings,
         int startIndex,
+        int summarySequence,
         CancellationToken cancellationToken)
     {
         Recording[] batch = recordings.Skip(startIndex).Take(RecordingsPerReplyBatch).ToArray();
         int nextIndex = startIndex + batch.Length;
         int remainingCount = recordings.Count - nextIndex;
-        await qq.SendTextAsync(message, BuildRecordingSummary(trackingNumber, query, batch, config.DeliveryMaxSizeMb, remainingCount), message.Id, 1, cancellationToken);
-        int sequence = 2;
+        await qq.SendTextAsync(message, BuildRecordingSummary(trackingNumber, query, batch, config.DeliveryMaxSizeMb, remainingCount), message.Id, summarySequence, cancellationToken);
+        int sequence = summarySequence + 1;
         foreach (Recording recording in batch)
         {
             await SendRecordingAsync(message, query, trackingNumber, recording, sequence++, cancellationToken);

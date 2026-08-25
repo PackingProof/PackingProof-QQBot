@@ -123,10 +123,56 @@ public sealed class QQClientTests
         }
     }
 
+    [Fact]
+    public async Task AllowedGroupQuery_ImmediatelyAcknowledgesBeforeResultWithUniqueSequences()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "PackingProof-QQBot-Test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var configuration = new QQBotConfiguration
+            {
+                AppId = "app",
+                PackingProofBaseUrl = "http://packingproof:5280",
+                ExtensionInstanceId = "qqbot-test",
+                AllowedGroupOpenIds = ["group-first"]
+            };
+            var secrets = new QQBotSecrets { AppSecret = "secret" };
+            var store = new QQBotStateStore(directory);
+            store.Save(configuration, secrets);
+            var handler = new QQReplyHandler();
+            using var http = new HttpClient(handler);
+            var qq = new QQClient(http, configuration, secrets);
+            var packingProof = new PackingProofClient(http, configuration, new ExtensionCredentialState
+            {
+                ExtensionInstanceId = "qqbot-test",
+                Credential = new string('a', 64),
+                CredentialGeneration = 1
+            });
+            var service = new QueryService(configuration, packingProof, qq, store);
+
+            await service.HandleAsync(
+                new QQIncomingMessage("message-2", "<@!bot-id> SF123456", "group-first", true),
+                CancellationToken.None);
+
+            Assert.Equal(2, handler.GroupMessageBodies.Count);
+            using JsonDocument acknowledgement = JsonDocument.Parse(handler.GroupMessageBodies[0]);
+            using JsonDocument result = JsonDocument.Parse(handler.GroupMessageBodies[1]);
+            Assert.Equal("正在查询单号 SF123456 的录像", acknowledgement.RootElement.GetProperty("content").GetString());
+            Assert.Equal(1, acknowledgement.RootElement.GetProperty("msg_seq").GetInt32());
+            Assert.Contains("未找到单号 SF123456", result.RootElement.GetProperty("content").GetString(), StringComparison.Ordinal);
+            Assert.Equal(2, result.RootElement.GetProperty("msg_seq").GetInt32());
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private sealed class QQReplyHandler : HttpMessageHandler
     {
         public int GroupReplyCount { get; private set; }
         public string LastMessageBody { get; private set; } = "";
+        public List<string> GroupMessageBodies { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -143,10 +189,14 @@ public sealed class QQClientTests
                 string body = request.Content == null
                     ? ""
                     : await request.Content.ReadAsStringAsync(cancellationToken);
+                GroupMessageBodies.Add(body);
                 using JsonDocument payload = JsonDocument.Parse(body);
                 LastMessageBody = payload.RootElement.GetProperty("content").GetString() ?? "";
                 return Json(HttpStatusCode.OK, "{}");
             }
+
+            if (request.RequestUri.AbsolutePath == "/api/extensions/v1/recording-queries")
+                return Json(HttpStatusCode.OK, "{\"queryId\":\"query-1\",\"status\":\"not_found\",\"recordings\":[]}");
 
             return Json(HttpStatusCode.NotFound, "{}");
         }
