@@ -392,7 +392,7 @@ internal sealed class QQBotManagerWindow : Window
         SetStatus(status);
         RefreshBotButton();
     });
-    private void OnGroupsChanged() => Dispatcher.BeginInvoke(RefreshGroups);
+    private void OnGroupsChanged() => Dispatcher.BeginInvoke(() => RefreshGroups());
     private void OnLogWritten(string entry) => Dispatcher.BeginInvoke(() =>
     {
         _logs.Items.Add(entry);
