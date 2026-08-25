@@ -30,7 +30,7 @@ internal sealed class QQBotManagerWindow : Window
     private readonly WpfTextBox _size = new();
     private readonly WpfComboBox _profile = new();
     private readonly WpfListBox _foundHosts = new();
-    private readonly WpfListBox _logs = new() { MaxHeight = 150 };
+    private readonly WpfTextBox _logs = new();
     private readonly WpfTextBlock _hostInfo = new();
     private readonly WpfTextBlock _status = new();
     private WpfButton? _botToggleButton;
@@ -143,11 +143,17 @@ internal sealed class QQBotManagerWindow : Window
         delivery.Children.Add(deliveryActions);
         panel.Children.Add(Card("视频发送", delivery));
 
-        _logs.MaxHeight = 160;
+        _logs.Height = 160;
+        _logs.IsReadOnly = true;
+        _logs.AcceptsReturn = true;
+        _logs.TextWrapping = TextWrapping.NoWrap;
+        _logs.VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto;
+        _logs.HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto;
         _logs.Background = Brush(248, 250, 252);
+        _logs.Padding = new Thickness(8, 6, 8, 6);
         var logPanel = new WpfStackPanel();
         logPanel.Children.Add(_logs);
-        logPanel.Children.Add(Row(Button("复制选中日志", CopySelectedLog)));
+        logPanel.Children.Add(Row(Button("复制全部日志", CopyAllLogs)));
         panel.Children.Add(Card("运行日志", logPanel));
         return new WpfScrollViewer { Content = panel, VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto, Background = Brush(245, 247, 250) };
     }
@@ -232,8 +238,7 @@ internal sealed class QQBotManagerWindow : Window
         _profile.SelectedIndex = config?.DeliveryProfile == QQBotConfiguration.H265TargetSizeProfile ? 1 : 0;
         RefreshGroups(config);
         RefreshHostInfo(config);
-        _logs.Items.Clear();
-        foreach (string entry in QQBotLog.Snapshot()) _logs.Items.Add(entry);
+        RefreshLogText(false);
         if (_startupButton != null) _startupButton.Content = config?.StartWithWindows == true ? "关闭开机自动启动" : "登录 Windows 后自动启动";
         RefreshBotButton();
         SetStatus(QQBotApplicationHost.CanAutoStart(config, secrets)
@@ -318,10 +323,10 @@ internal sealed class QQBotManagerWindow : Window
         catch (Exception exception) { SetStatus("复制失败：" + exception.Message); }
     }
 
-    private void CopySelectedLog(object sender, RoutedEventArgs eventArgs)
+    private void CopyAllLogs(object sender, RoutedEventArgs eventArgs)
     {
-        if (_logs.SelectedItem is not string entry) { SetStatus("请先选择一条日志"); return; }
-        try { WpfClipboard.SetText(entry); SetStatus("日志已复制"); }
+        if (string.IsNullOrWhiteSpace(_logs.Text)) { SetStatus("当前没有可复制的日志"); return; }
+        try { WpfClipboard.SetText(_logs.Text); SetStatus("全部日志已复制"); }
         catch (Exception exception) { SetStatus("复制失败：" + exception.Message); }
     }
 
@@ -393,12 +398,12 @@ internal sealed class QQBotManagerWindow : Window
         RefreshBotButton();
     });
     private void OnGroupsChanged() => Dispatcher.BeginInvoke(() => RefreshGroups());
-    private void OnLogWritten(string entry) => Dispatcher.BeginInvoke(() =>
+    private void OnLogWritten(string _) => Dispatcher.BeginInvoke(() => RefreshLogText(true));
+    private void RefreshLogText(bool scrollToEnd)
     {
-        _logs.Items.Add(entry);
-        while (_logs.Items.Count > 100) _logs.Items.RemoveAt(0);
-        _logs.ScrollIntoView(entry);
-    });
+        _logs.Text = string.Join(Environment.NewLine, QQBotLog.Snapshot());
+        if (scrollToEnd) _logs.ScrollToEnd();
+    }
     private void SetStatus(string text)
     {
         _status.Text = $"{DateTime.Now:HH:mm:ss} {text}";
