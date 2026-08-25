@@ -196,17 +196,22 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
                 cancellationToken);
             return;
         }
-        if (string.Equals(message.Content.Trim(), "继续", StringComparison.Ordinal))
+        string command = TrackingNumberParser.NormalizeCommandContent(message.Content);
+        if (string.Equals(command, "继续", StringComparison.Ordinal))
         {
             await ContinueAsync(message, cancellationToken);
             return;
         }
-        if (!TrackingNumberParser.TryParse(message.Content, out string number))
+        if (!TrackingNumberParser.TryParse(command, out string number))
         {
-            if (!message.IsGroup)
-                await qq.SendTextAsync(message, "请直接发送完整快递单号，例如 SF1234567890", message.Id, 1, cancellationToken);
+            QQBotLog.Write(message.IsGroup ? "群消息中未识别到有效单号" : "私聊消息中未识别到有效单号");
+            string prompt = message.IsGroup
+                ? "没有识别到完整快递单号，请在 @机器人 后直接填写单号，例如 SF1234567890"
+                : "请直接发送完整快递单号，例如 SF1234567890";
+            await qq.SendTextAsync(message, prompt, message.Id, 1, cancellationToken);
             return;
         }
+        QQBotLog.Write($"已识别单号 {number}，正在查询 PackingProof");
         RecordingQuery query = await packingProof.CreateQueryAsync(number, cancellationToken);
         while (query.Status is "queued" or "searching" or "preparing") { await Task.Delay(1000, cancellationToken); query = await packingProof.GetQueryAsync(query.QueryId, cancellationToken); }
         if (query.Status == "not_found") { await qq.SendTextAsync(message, $"未找到单号 {number} 的关联录像", message.Id, 1, cancellationToken); return; }
