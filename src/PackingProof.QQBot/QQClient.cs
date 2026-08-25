@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Globalization;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Net.WebSockets;
@@ -16,6 +18,7 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
     private readonly QQBotConfiguration _configuration = configuration;
     private readonly QQBotSecrets _secrets = secrets;
     private readonly SemaphoreSlim _tokenGate = new(1, 1);
+    private readonly ConcurrentDictionary<string, int> _replySequences = new(StringComparer.Ordinal);
     private string? _accessToken;
     private DateTimeOffset _accessTokenExpiresAt;
 
@@ -46,11 +49,20 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
 
     public async Task SendTextAsync(QQIncomingMessage message, string content, string? messageId, int sequence, CancellationToken cancellationToken)
     {
-        var body = new Dictionary<string, object?> { ["msg_type"] = 0, ["content"] = content };
-        if (!string.IsNullOrWhiteSpace(messageId)) { body["msg_id"] = messageId; body["msg_seq"] = sequence; }
-        using HttpResponseMessage response = await SendAsync(HttpMethod.Post, MessageRoot(message) + "/messages", body, cancellationToken);
-        using JsonDocument payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        EnsureSuccess(response, payload, "发送 QQ 消息失败");
+        if (string.IsNullOrWhiteSpace(messageId))
+        {
+            using HttpResponseMessage response = await SendAsync(HttpMethod.Post, MessageRoot(message) + "/messages", new { msg_type = 0, content }, cancellationToken);
+            using JsonDocument payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+            EnsureSuccess(response, payload, "发送 QQ 消息失败");
+            return;
+        }
+        await SendPassiveReplyAsync(
+            message,
+            messageId,
+            sequence,
+            actualSequence => new { msg_type = 0, content, msg_id = messageId, msg_seq = actualSequence },
+            "发送 QQ 消息失败",
+            cancellationToken);
     }
 
     public async Task SendRecordingAsync(QQIncomingMessage message, string filePath, string fileName, string videoCodec, string messageId, int sequence, CancellationToken cancellationToken)
@@ -85,9 +97,54 @@ public sealed class QQClient(HttpClient http, QQBotConfiguration configuration, 
         using JsonDocument mergedBody = await JsonDocument.ParseAsync(await merged.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         EnsureSuccess(merged, mergedBody, "合并 QQ 录像上传失败");
         string fileInfo = mergedBody.RootElement.GetProperty("file_info").GetString() ?? throw new InvalidDataException("QQ 文件信息为空");
-        using HttpResponseMessage sent = await SendAsync(HttpMethod.Post, root + "/messages", new { msg_type = 7, msg_id = messageId, msg_seq = sequence, media = new { file_info = fileInfo } }, cancellationToken);
-        using JsonDocument sentBody = await JsonDocument.ParseAsync(await sent.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        EnsureSuccess(sent, sentBody, "发送 QQ 录像失败");
+        await SendPassiveReplyAsync(
+            message,
+            messageId,
+            sequence,
+            actualSequence => new { msg_type = 7, msg_id = messageId, msg_seq = actualSequence, media = new { file_info = fileInfo } },
+            "发送 QQ 录像失败",
+            cancellationToken);
+    }
+
+    private async Task SendPassiveReplyAsync(
+        QQIncomingMessage message,
+        string messageId,
+        int requestedSequence,
+        Func<int, object> createBody,
+        string failureMessage,
+        CancellationToken cancellationToken)
+    {
+        int sequence = ReserveReplySequence(messageId, requestedSequence);
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            using HttpResponseMessage response = await SendAsync(HttpMethod.Post, MessageRoot(message) + "/messages", createBody(sequence), cancellationToken);
+            using JsonDocument payload = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+            if (response.IsSuccessStatusCode) return;
+            if (attempt == 0 && IsMessageDeduplication(response, payload))
+            {
+                QQBotLog.Write("QQ 判定回复序号重复，已自动更换序号重试");
+                sequence = ReserveReplySequence(messageId, sequence + 1);
+                continue;
+            }
+            EnsureSuccess(response, payload, failureMessage);
+        }
+        throw new InvalidOperationException(failureMessage);
+    }
+
+    private int ReserveReplySequence(string messageId, int requestedSequence) =>
+        _replySequences.AddOrUpdate(
+            messageId,
+            Math.Max(1, requestedSequence),
+            (_, previous) => Math.Max(requestedSequence, previous + 1));
+
+    private static bool IsMessageDeduplication(HttpResponseMessage response, JsonDocument payload)
+    {
+        if (response.StatusCode != HttpStatusCode.BadRequest
+            || !payload.RootElement.TryGetProperty("message", out JsonElement message)) return false;
+        string detail = message.GetString() ?? "";
+        return detail.Contains("去重", StringComparison.OrdinalIgnoreCase)
+            || detail.Contains("msgseq", StringComparison.OrdinalIgnoreCase)
+            || detail.Contains("msg_seq", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task RunGatewayAsync(Func<QQIncomingMessage, CancellationToken, Task> handler, CancellationToken cancellationToken)

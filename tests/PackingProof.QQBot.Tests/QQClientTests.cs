@@ -267,6 +267,23 @@ public sealed class QQClientTests
         }
     }
 
+    [Fact]
+    public async Task SendTextAsync_RetriesDeduplicatedSequenceAndAdvancesFollowingReply()
+    {
+        var handler = new DeduplicationReplyHandler();
+        using var http = new HttpClient(handler);
+        var qq = new QQClient(
+            http,
+            new QQBotConfiguration { AppId = "app" },
+            new QQBotSecrets { AppSecret = "secret" });
+        var message = new QQIncomingMessage("message-deduplicated", "invalid", "user-first", false);
+
+        await qq.SendTextAsync(message, "格式错误", message.Id, 1, CancellationToken.None);
+        await qq.SendTextAsync(message, "下一条回复", message.Id, 2, CancellationToken.None);
+
+        Assert.Equal([1, 2, 3], handler.Sequences);
+    }
+
     private static int ReadMessageSequence(string body)
     {
         using JsonDocument document = JsonDocument.Parse(body);
@@ -339,6 +356,33 @@ public sealed class QQClientTests
             }
 
             return Json(HttpStatusCode.NotFound, "{}");
+        }
+
+        private static HttpResponseMessage Json(HttpStatusCode statusCode, string body) => new(statusCode)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json")
+        };
+    }
+
+    private sealed class DeduplicationReplyHandler : HttpMessageHandler
+    {
+        public List<int> Sequences { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            if (request.RequestUri!.AbsoluteUri.Contains("/app/getAppAccessToken", StringComparison.Ordinal))
+                return Json(HttpStatusCode.OK, "{\"access_token\":\"token\",\"expires_in\":3600}");
+
+            string body = request.Content == null
+                ? ""
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+            using JsonDocument payload = JsonDocument.Parse(body);
+            Sequences.Add(payload.RootElement.GetProperty("msg_seq").GetInt32());
+            return Sequences.Count == 1
+                ? Json(HttpStatusCode.BadRequest, "{\"message\":\"消息被去重，请检查请求msgseq\"}")
+                : Json(HttpStatusCode.OK, "{}");
         }
 
         private static HttpResponseMessage Json(HttpStatusCode statusCode, string body) => new(statusCode)
