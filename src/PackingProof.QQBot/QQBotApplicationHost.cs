@@ -32,17 +32,24 @@ internal sealed class QQBotApplicationHost : IDisposable
                 _application.Dispatcher.BeginInvoke(ShowWindow), null, Timeout.Infinite, false);
         }
         CreateTrayIcon();
-        if (_startInBackground)
+        if (CanAutoStart(_store.LoadConfiguration(), _store.LoadSecrets()))
         {
             _runtime.Start();
         }
-        else
+        if (!_startInBackground)
         {
             ShowWindow();
         }
         _application.Run();
         return 0;
     }
+
+    internal static bool CanAutoStart(QQBotConfiguration? configuration, QQBotSecrets? secrets) =>
+        configuration != null
+        && !string.IsNullOrWhiteSpace(configuration.AppId)
+        && secrets?.ExtensionCredential != null
+        && !string.IsNullOrWhiteSpace(secrets.AppSecret)
+        && !string.IsNullOrWhiteSpace(secrets.ExtensionCredential.Credential);
 
     private void CreateTrayIcon()
     {

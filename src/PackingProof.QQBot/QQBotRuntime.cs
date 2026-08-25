@@ -27,6 +27,7 @@ internal sealed class QQBotRuntime(QQBotStateStore store) : IDisposable
             _runTask = RunCoreAsync(_cancellation.Token);
             _ = ObserveCompletionAsync(_runTask);
         }
+        PublishStatus("机器人正在启动");
     }
 
     public void Stop() => _cancellation?.Cancel();

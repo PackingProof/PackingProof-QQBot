@@ -33,6 +33,7 @@ internal sealed class QQBotManagerWindow : Window
     private readonly WpfListBox _logs = new() { MaxHeight = 150 };
     private readonly WpfTextBlock _hostInfo = new();
     private readonly WpfTextBlock _status = new();
+    private WpfButton? _botToggleButton;
     private WpfButton? _startupButton;
     private WpfButton? _useSelectedHostButton;
 
@@ -71,8 +72,9 @@ internal sealed class QQBotManagerWindow : Window
         _status.Foreground = Brush(30, 64, 175);
         var controls = new WpfStackPanel();
         controls.Children.Add(_status);
+        _botToggleButton = PrimaryButton("启动机器人", ToggleBot);
         _startupButton = Button("", ToggleStartup);
-        controls.Children.Add(Row(PrimaryButton("启动机器人", StartAsync), Button("停止机器人", Stop), _startupButton, Button("使用教程", OpenUserGuide)));
+        controls.Children.Add(Row(_botToggleButton, _startupButton, Button("使用教程", OpenUserGuide)));
         panel.Children.Add(new WpfBorder { Background = Brush(239, 246, 255), BorderBrush = Brush(191, 219, 254), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(14, 10, 14, 10), Child = controls, Margin = new Thickness(0, 0, 0, 14) });
 
         var connection = FormGrid(7);
@@ -233,7 +235,10 @@ internal sealed class QQBotManagerWindow : Window
         _logs.Items.Clear();
         foreach (string entry in QQBotLog.Snapshot()) _logs.Items.Add(entry);
         if (_startupButton != null) _startupButton.Content = config?.StartWithWindows == true ? "关闭开机自动启动" : "登录 Windows 后自动启动";
-        SetStatus(config == null ? "请填写 QQ AppID、AppSecret 和 PackingProof 地址，然后保存并授权" : "管理器已就绪，可启动机器人或修改设置");
+        RefreshBotButton();
+        SetStatus(QQBotApplicationHost.CanAutoStart(config, secrets)
+            ? "管理器已就绪，机器人将自动启动"
+            : "请填写 QQ AppID、AppSecret 和 PackingProof 地址，然后保存并授权");
     }
 
     private void RefreshGroups(QQBotConfiguration? config = null)
@@ -327,13 +332,36 @@ internal sealed class QQBotManagerWindow : Window
         _store.Save(config, RequireSecrets()); SetStatus("视频设置已保存");
     }
 
-    private void StartAsync(object sender, RoutedEventArgs eventArgs)
+    private void ToggleBot(object sender, RoutedEventArgs eventArgs)
     {
-        try { _runtime.Start(); SetStatus("机器人正在启动"); }
+        if (_runtime.IsRunning)
+        {
+            _runtime.Stop();
+            SetStatus("正在停止机器人");
+            return;
+        }
+
+        try
+        {
+            _runtime.Start();
+            RefreshBotButton();
+            SetStatus("机器人正在启动");
+        }
         catch (Exception exception) { SetStatus(exception.Message); }
     }
 
-    private void Stop(object sender, RoutedEventArgs eventArgs) { _runtime.Stop(); SetStatus("正在停止机器人"); }
+    private void RefreshBotButton()
+    {
+        if (_botToggleButton == null) return;
+        bool isRunning = _runtime.IsRunning;
+        _botToggleButton.Content = BotToggleText(isRunning);
+        _botToggleButton.Background = isRunning ? Brush(220, 38, 38) : Brush(37, 99, 235);
+        _botToggleButton.BorderBrush = _botToggleButton.Background;
+        _botToggleButton.Foreground = System.Windows.Media.Brushes.White;
+    }
+
+    internal static string BotToggleText(bool isRunning) => isRunning ? "停止机器人" : "启动机器人";
+
     private void OpenUserGuide(object sender, RoutedEventArgs eventArgs)
     {
         string guidePath = Path.Combine(AppContext.BaseDirectory, "使用说明.md");
@@ -359,7 +387,11 @@ internal sealed class QQBotManagerWindow : Window
             : $"当前主机：{(string.IsNullOrWhiteSpace(config.PackingProofNodeName) ? "名称待确认" : config.PackingProofNodeName)}｜{config.PackingProofBaseUrl}";
     }
     private static string FormatHost(PackingProofHostInfo host) => $"主机：{host.NodeName}｜地址：{host.BaseUrl}";
-    private void OnRuntimeStatusChanged(string status) => Dispatcher.BeginInvoke(() => SetStatus(status));
+    private void OnRuntimeStatusChanged(string status) => Dispatcher.BeginInvoke(() =>
+    {
+        SetStatus(status);
+        RefreshBotButton();
+    });
     private void OnGroupsChanged() => Dispatcher.BeginInvoke(RefreshGroups);
     private void OnLogWritten(string entry) => Dispatcher.BeginInvoke(() =>
     {

@@ -33,7 +33,7 @@ internal static class Program
         string host = Optional("PackingProof 地址", "http://127.0.0.1:5280").TrimEnd('/');
         if (!Uri.TryCreate(host, UriKind.Absolute, out _)) throw new InvalidDataException("PackingProof 地址无效");
         await SaveConfigurationAsync(store, appId, secret, host, CancellationToken.None);
-        Console.WriteLine("配置已保存。接下来双击“启动机器人”，在私聊中向机器人发送一个单号；也可在目标群 @机器人发送一个单号");
+        Console.WriteLine("配置已保存，机器人会在打开 QQBot 后自动启动。可在私聊中发送单号，也可在目标群 @机器人发送单号");
         return 0;
     }
 
