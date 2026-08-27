@@ -6,3 +6,4 @@ TestResults/
 *.user
 settings.json
 secrets.dat
+Release/
