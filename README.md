@@ -55,10 +55,10 @@ QQBot 仅通过 PackingProof 的扩展 API 查询、下载录像和请求交付�
 
 ## 维护者发布
 
-运行以下命令会读取项目版本，生成普通 Windows ZIP 和 PackingProof 扩展市场 `.ppx`：
+运行以下命令会读取项目版本，生成普通 Windows ZIP 和 PackingProof 扩展市场 `.ppext`：
 
 ```powershell
-pwsh -NoProfile -File Tools/Build-Ppx.ps1
+pwsh -NoProfile -File Tools/Build-Ppext.ps1
 ```
 
-`.ppx` 只是 ZIP 分发容器，声明 `manual-external` 安装模式。PackingProof 只负责校验、解包和展示入口，不会自动运行 QQBot
+`.ppext` 是带有 `packingproof-extension` 格式标识的 ZIP 分发容器，声明 `manual-external` 安装模式。PackingProof 只负责校验、解包和展示入口，不会自动运行 QQBot

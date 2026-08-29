@@ -21,12 +21,12 @@ if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
 
 [System.IO.Directory]::CreateDirectory($releaseRoot) | Out-Null
 $releaseFullPath = [System.IO.Path]::GetFullPath($releaseRoot).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
-$workingDirectory = Join-Path $releaseRoot (".ppx-build-" + [Guid]::NewGuid().ToString("N"))
+$workingDirectory = Join-Path $releaseRoot (".ppext-build-" + [Guid]::NewGuid().ToString("N"))
 $payloadDirectory = Join-Path $workingDirectory "payload"
 $zipPath = Join-Path $releaseRoot "PackingProof-QQBot-$Version-win-x64.zip"
-$ppxPath = Join-Path $releaseRoot "packingproof.qqbot-$Version.ppx"
+$ppextPath = Join-Path $releaseRoot "packingproof.qqbot-$Version.ppext"
 
-foreach ($outputPath in @($zipPath, $ppxPath)) {
+foreach ($outputPath in @($zipPath, $ppextPath)) {
     if (Test-Path -LiteralPath $outputPath) {
         throw "发布文件已经存在，请先确认并移走旧文件：$outputPath"
     }
@@ -53,6 +53,7 @@ try {
 
     $manifest = [ordered]@{
         schemaVersion = 1
+        format = "packingproof-extension"
         packageFormatVersion = 1
         id = "packingproof.qqbot"
         version = $Version
@@ -62,7 +63,7 @@ try {
             suggestedPath = "payload/PackingProof.QQBot.exe"
         }
         compatibility = [ordered]@{
-            minPackingProofVersion = "0.0.62"
+            minPackingProofVersion = "0.0.63"
             platforms = [ordered]@{
                 windows = @("x64")
             }
@@ -113,12 +114,12 @@ try {
         $false)
     [System.IO.Compression.ZipFile]::CreateFromDirectory(
         $workingDirectory,
-        $ppxPath,
+        $ppextPath,
         [System.IO.Compression.CompressionLevel]::Optimal,
         $false)
 
     Write-Host "已生成：$zipPath"
-    Write-Host "已生成：$ppxPath"
+    Write-Host "已生成：$ppextPath"
 }
 finally {
     if (Test-Path -LiteralPath $workingDirectory) {
