@@ -52,3 +52,13 @@
 QQBot 仅通过 PackingProof 的扩展 API 查询、下载录像和请求交付副本；不会访问数据库、录像目录或 NAS 凭据。QQ AppSecret 和扩展凭据使用当前 Windows 用户加密保存，不写入发布文件夹。
 
 视频默认上限为 190 MB，可设为 1–200 MB。原片未超限时会直接发送；超限时由 PackingProof 主机按录像实际时长计算目标码率，生成临时副本。QQBot 本身不打包 FFmpeg，也不修改原片。详见 [新手指南](docs/新手指南.md) 中的“视频大小与转码”。
+
+## 维护者发布
+
+运行以下命令会读取项目版本，生成普通 Windows ZIP 和 PackingProof 扩展市场 `.ppx`：
+
+```powershell
+pwsh -NoProfile -File Tools/Build-Ppx.ps1
+```
+
+`.ppx` 只是 ZIP 分发容器，声明 `manual-external` 安装模式。PackingProof 只负责校验、解包和展示入口，不会自动运行 QQBot
