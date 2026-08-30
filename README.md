@@ -61,4 +61,4 @@ QQBot 仅通过 PackingProof 的扩展 API 查询、下载录像和请求交付�
 pwsh -NoProfile -File Tools/Build-Ppext.ps1
 ```
 
-`.ppext` 是带有 `packingproof-extension` 格式标识的 ZIP 分发容器，声明 `manual-external` 安装模式。PackingProof 只负责校验、解包和展示入口，不会自动运行 QQBot
+`.ppext` 是带有 `packingproof-extension` 格式标识的 ZIP 分发容器，声明 `manual-external` 安装模式。PackingProof 只负责校验、解包和展示入口，不会自动运行 QQBot；用户安装后可在扩展市场点击“启动”运行 `payload/PackingProof.QQBot.exe`

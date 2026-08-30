@@ -62,6 +62,9 @@ try {
             mode = "manual-external"
             suggestedPath = "payload/PackingProof.QQBot.exe"
         }
+        launcher = [ordered]@{
+            path = "payload/PackingProof.QQBot.exe"
+        }
         compatibility = [ordered]@{
             minPackingProofVersion = "0.0.63"
             platforms = [ordered]@{
