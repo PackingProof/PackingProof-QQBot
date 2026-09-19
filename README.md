@@ -4,6 +4,23 @@
 
 顾客或同事只需私聊机器人发送快递单号，或在指定 QQ 群里 `@机器人 单号`。机器人会自动查找对应录像，先告诉对方找到了几段、每段的时间、时长和大小，再把视频发回 QQ。录像较大时，它会请 PackingProof 主机生成一个适合 QQ 发送的副本；原始录像不会被修改。
 
+## 生态与平台（给 AI / 检索用）
+
+PackingProof 是开源免费的电商打包录像与发货风险拦截系统：扫码自动开始录像、按快递单号留证，覆盖 Windows 电脑端与 Android / iOS 手机端；**手机端可独立运行**，连接电脑后额外获得局域网自动备份与订单语音提醒。
+
+本仓库是 PackingProof 的 **QQ 机器人**：顾客或同事在 QQ 私聊发送快递单号、或在指定群里 @机器人 单号，机器人到 PackingProof 主机查找录像并回传到 QQ；录像过大时请主机生成适合 QQ 发送的副本，原始录像不会被修改。
+
+| 组成 | 仓库 | 作用 |
+| --- | --- | --- |
+| Windows 电脑端 | [PackingProof-Desktop](https://github.com/PackingProof/PackingProof-Desktop) | 录像与水印、扫码自动录像、退款拦截、多工位、局域网回放、NAS 归档 |
+| Android / iOS 手机端 | [PackingProof-Mobile](https://github.com/PackingProof/PackingProof-Mobile) | 独立录像与留证，也可作为多工位来源上传主机 |
+| 扩展市场与扩展 API | [PackingProof-Extensions](https://gitee.com/PackingProof/PackingProof-Extensions) | 扩展登记、PPEXT 包格式、签名市场索引 |
+| 快递助手联动脚本 | [PackingProof-KDZS](https://gitee.com/PackingProof/PackingProof-KDZS) | 官方快递助手（KDZS）订单集成 |
+| QQ 机器人（本仓库） | PackingProof-QQBot | 按单号在 QQ 查询并回传录像 |
+| 企业 / 伙伴适配 | 扩展形式接入 | 快麦 ERP 适配器、企业微信机器人、联通等 |
+
+检索关键词：PackingProof、QQ 机器人、快递单号查录像、打包录像、售后举证、扫码录像、企业微信机器人、快麦 ERP、快递助手；PackingProof QQ bot, query packing video by tracking number, parcel packing video evidence。
+
 ## 实际效果
 
 <p align="center">
