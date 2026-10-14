@@ -23,6 +23,8 @@ if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
 $releaseFullPath = [System.IO.Path]::GetFullPath($releaseRoot).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
 $workingDirectory = Join-Path $releaseRoot (".ppext-build-" + [Guid]::NewGuid().ToString("N"))
 $payloadDirectory = Join-Path $workingDirectory "payload"
+# 独立包的自包含发布目录必须放在 ppext 暂存目录之外，否则会被一起打进 .ppext。
+$standaloneDirectory = Join-Path $releaseRoot (".standalone-build-" + [Guid]::NewGuid().ToString("N"))
 $zipPath = Join-Path $releaseRoot "PackingProof-QQBot-$Version-win-x64.zip"
 $ppextPath = Join-Path $releaseRoot "packingproof.qqbot-$Version.ppext"
 
@@ -41,7 +43,9 @@ function Assert-UnderReleaseRoot([string]$Path) {
 
 try {
     [System.IO.Directory]::CreateDirectory($payloadDirectory) | Out-Null
-    & dotnet publish $projectPath -c Release -r win-x64 --self-contained true -p:Version=$Version -o $payloadDirectory
+    # 市场版（.ppext）由 PackingProof 桌面端启动，桌面端把自己的共享运行时通过 DOTNET_ROOT 交给它用，
+    # 所以这里按框架依赖发布：几十 KB，不再自带整套 .NET。
+    & dotnet publish $projectPath -c Release -r win-x64 --self-contained false -p:Version=$Version -o $payloadDirectory
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish 失败，退出码：$LASTEXITCODE"
     }
@@ -49,6 +53,27 @@ try {
     $executablePath = Join-Path $payloadDirectory "PackingProof.QQBot.exe"
     if (-not (Test-Path -LiteralPath $executablePath)) {
         throw "发布输出缺少 PackingProof.QQBot.exe"
+    }
+    foreach ($runtimeOnlyFile in @("coreclr.dll", "hostfxr.dll", "System.Private.CoreLib.dll", "PresentationFramework.dll")) {
+        if (Test-Path -LiteralPath (Join-Path $payloadDirectory $runtimeOnlyFile)) {
+            throw "市场版必须复用桌面端运行时，payload 里不该出现 $runtimeOnlyFile"
+        }
+    }
+    $payloadBytes = (Get-ChildItem -LiteralPath $payloadDirectory -File -Recurse | Measure-Object Length -Sum).Sum
+    if ($payloadBytes -gt 8MB) {
+        throw ("市场版 payload 体积异常：{0:N1} MB，应当只有几十 KB 量级" -f ($payloadBytes / 1MB))
+    }
+
+    # 跨机使用的独立包仍带自己的运行时（那种场景没有桌面端可复用），保持“免装 .NET”的承诺。
+    [System.IO.Directory]::CreateDirectory($standaloneDirectory) | Out-Null
+    & dotnet publish $projectPath -c Release -r win-x64 --self-contained true `
+        -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true `
+        -p:Version=$Version -o $standaloneDirectory
+    if ($LASTEXITCODE -ne 0) {
+        throw "独立包 dotnet publish 失败，退出码：$LASTEXITCODE"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $standaloneDirectory "PackingProof.QQBot.exe"))) {
+        throw "独立包发布输出缺少 PackingProof.QQBot.exe"
     }
 
     # 发布包里的《使用说明》是 PDF（用户双击即可阅读），每次发布都由 docs\新手指南.md 现场转换，
@@ -62,6 +87,7 @@ try {
     if ($guideHeader -ne "%PDF-") {
         throw "生成的《使用说明.pdf》不是有效 PDF"
     }
+    Copy-Item -LiteralPath $guidePdfPath -Destination (Join-Path $standaloneDirectory "使用说明.pdf") -Force
 
     $manifest = [ordered]@{
         schemaVersion = 1
@@ -123,7 +149,7 @@ try {
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.ZipFile]::CreateFromDirectory(
-        $payloadDirectory,
+        $standaloneDirectory,
         $zipPath,
         [System.IO.Compression.CompressionLevel]::Optimal,
         $false)
@@ -162,5 +188,9 @@ finally {
     if (Test-Path -LiteralPath $workingDirectory) {
         Assert-UnderReleaseRoot $workingDirectory
         Remove-Item -LiteralPath $workingDirectory -Recurse -Force
+    }
+    if (Test-Path -LiteralPath $standaloneDirectory) {
+        Assert-UnderReleaseRoot $standaloneDirectory
+        Remove-Item -LiteralPath $standaloneDirectory -Recurse -Force
     }
 }
