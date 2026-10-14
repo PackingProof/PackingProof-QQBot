@@ -177,6 +177,7 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
     private const int ConcurrentQueryLimit = 3;
     private static readonly TimeSpan DeliveryNoticeDelay = TimeSpan.FromSeconds(60);
     private const string DeliveryWaitingText = "副本还在生成中，完成后会直接发给你，不用重发单号";
+    private const string DeliveryRetryText = "第一次没压够，正在再压一遍，好了会直接发给你";
     private readonly ConcurrentDictionary<string, byte> _handled = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, PendingRecordingBatch> _pendingBatches = new(StringComparer.Ordinal);
 
@@ -314,6 +315,13 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
             if (requiresDelivery)
             {
                 delivery = await packingProof.CreateDeliveryAsync(query.QueryId, recording.RecordingId, config.DeliveryProfile, config.DeliveryMaxSizeMb, cancellationToken);
+                if (delivery.EstimatedSeconds > 0)
+                {
+                    await qq.SendTextAsync(
+                        message,
+                        DeliveryEstimateText(recording.FileSizeBytes, config.DeliveryMaxSizeMb, delivery.EstimatedSeconds),
+                        message.Id, sequence, cancellationToken);
+                }
                 delivery = await WaitForDeliveryAsync(message, query, recording, delivery, sequence, cancellationToken);
                 if (delivery.Status is not ("ready" or "completed"))
                 {
@@ -361,10 +369,18 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
         CancellationToken cancellationToken)
     {
         DateTimeOffset startedAt = DateTimeOffset.UtcNow;
-        bool notified = false;
+        // 已经发过带估算的提示时不再重复“还在生成”；重试那一句无论如何都要说。
+        bool notified = delivery.EstimatedSeconds > 0;
+        bool retryNotified = false;
         while (delivery.Status is "queued" or "transcoding" or "downloading")
         {
-            if (!notified && DateTimeOffset.UtcNow - startedAt >= DeliveryNoticeDelay)
+            if (!retryNotified && delivery.Attempt >= 2)
+            {
+                retryNotified = true;
+                notified = true;
+                await qq.SendTextAsync(message, DeliveryRetryText, message.Id, sequence, cancellationToken);
+            }
+            else if (!notified && DateTimeOffset.UtcNow - startedAt >= DeliveryNoticeDelay)
             {
                 notified = true;
                 await qq.SendTextAsync(message, DeliveryWaitingText, message.Id, sequence, cancellationToken);
@@ -491,8 +507,17 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
         "delivery_profile_unsupported" => "录像已找到，但当前交付预设不支持该录像编码",
         "delivery_cache_limit_exceeded" => "录像已找到，但主机转码缓存空间不足",
         "delivery_duration_unavailable" => "录像已找到，但缺少有效时长，无法计算目标码率",
+        "delivery_transcode_stalled" => "录像已找到，但主机压制副本时长时间没有进展并已中断，请稍后再试",
         _ => "录像已找到，但生成交付副本失败，请稍后重试"
     };
+
+    /// <summary>把主机的估算并进开始等待时那条提示，避免只丢一句“稍等”。</summary>
+    private static string DeliveryEstimateText(long fileSizeBytes, int maxSizeMb, double estimatedSeconds)
+    {
+        int minutes = (int)Math.Ceiling(estimatedSeconds / 60d);
+        if (minutes < 1) minutes = 1;
+        return $"录像 {FormatMegabytes(fileSizeBytes)} 超过 {maxSizeMb} MB 上限，主机正在生成副本，约需 {minutes} 分钟，好了会直接发给你";
+    }
 
     private sealed record QueryOutcome(string TrackingNumber, RecordingQuery? Query, Recording[] Recordings, string StatusText);
     private sealed record QueuedRecording(string TrackingNumber, RecordingQuery Query, Recording Recording);
