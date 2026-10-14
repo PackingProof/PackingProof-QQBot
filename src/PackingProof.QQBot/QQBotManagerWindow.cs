@@ -369,10 +369,21 @@ internal sealed class QQBotManagerWindow : Window
 
     private void OpenUserGuide(object sender, RoutedEventArgs eventArgs)
     {
-        string guidePath = Path.Combine(AppContext.BaseDirectory, "使用说明.md");
-        if (!File.Exists(guidePath)) { SetStatus("未找到《使用说明》，请确认发布包文件完整"); return; }
+        string guidePath = ResolveUserGuidePath();
+        if (guidePath.Length == 0) { SetStatus("未找到《使用说明》，请确认发布包文件完整"); return; }
         try { Process.Start(new ProcessStartInfo(guidePath) { UseShellExecute = true }); }
         catch (Exception exception) { SetStatus("打开使用教程失败：" + exception.Message); }
+    }
+
+    /// <summary>发布包内提供 PDF 版《使用说明》；更早的发布包里是 Markdown。</summary>
+    private static string ResolveUserGuidePath()
+    {
+        foreach (string fileName in new[] { "使用说明.pdf", "使用说明.md" })
+        {
+            string candidate = Path.Combine(AppContext.BaseDirectory, fileName);
+            if (File.Exists(candidate)) return candidate;
+        }
+        return "";
     }
     private void ToggleStartup(object sender, RoutedEventArgs eventArgs)
     {
