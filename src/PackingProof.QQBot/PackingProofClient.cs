@@ -208,6 +208,8 @@ public sealed class RecordingDelivery
     public string DeliveryId { get; init; } = "";
     public string Status { get; init; } = "";
     public int Progress { get; init; }
+    public double EstimatedSeconds { get; init; }
+    public int Attempt { get; init; }
     public long FileSizeBytes { get; init; }
     public double DurationSeconds { get; init; }
     public string VideoCodec { get; init; } = "";
