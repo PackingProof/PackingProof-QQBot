@@ -1,14 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <!--
+      市场版（.ppext）由 PackingProof 桌面端启动，桌面端会通过 DOTNET_ROOT 把安装目录里的共享运行时
+      交给它复用，所以默认按框架依赖发布，几十 KB 就够。机器人的代码不用 WinRT，TFM 不需要带 Windows
+      版本号（带版本号会把 24MB 的 Windows SDK 投影一起带上）。
+      跨机的独立包仍按自包含方式单独发布，见 Tools\Build-Ppext.ps1。
+    -->
+    <TargetFramework>net8.0-windows</TargetFramework>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <SelfContained>true</SelfContained>
+    <SelfContained>false</SelfContained>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Version>0.0.7</Version>
-    <PublishSingleFile>true</PublishSingleFile>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishSingleFile>false</PublishSingleFile>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
