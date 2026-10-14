@@ -175,6 +175,8 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
 {
     private const int RecordingsPerReplyBatch = 3;
     private const int ConcurrentQueryLimit = 3;
+    private static readonly TimeSpan DeliveryNoticeDelay = TimeSpan.FromSeconds(60);
+    private const string DeliveryWaitingText = "副本还在生成中，完成后会直接发给你，不用重发单号";
     private readonly ConcurrentDictionary<string, byte> _handled = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, PendingRecordingBatch> _pendingBatches = new(StringComparer.Ordinal);
 
@@ -312,11 +314,7 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
             if (requiresDelivery)
             {
                 delivery = await packingProof.CreateDeliveryAsync(query.QueryId, recording.RecordingId, config.DeliveryProfile, config.DeliveryMaxSizeMb, cancellationToken);
-                while (delivery.Status is "queued" or "transcoding" or "downloading")
-                {
-                    await Task.Delay(1000, cancellationToken);
-                    delivery = await packingProof.GetDeliveryAsync(query.QueryId, recording.RecordingId, delivery.DeliveryId, cancellationToken);
-                }
+                delivery = await WaitForDeliveryAsync(message, query, recording, delivery, sequence, cancellationToken);
                 if (delivery.Status is not ("ready" or "completed"))
                 {
                     await qq.SendTextAsync(message, DeliveryFailureText(delivery.ErrorCode), message.Id, sequence, cancellationToken);
@@ -347,6 +345,34 @@ internal sealed class QueryService(QQBotConfiguration config, PackingProofClient
             QQBotLog.Write($"转发{downloadKind}失败：{exception.Message}");
             await qq.SendTextAsync(message, "录像已找到，但转发到 QQ 失败，请稍后重试", message.Id, sequence, cancellationToken);
         }
+    }
+
+    /// <summary>
+    /// 等待主机生成交付副本。超限转码可能压几分钟到几十分钟，全程不说话会让用户以为机器人卡住了，
+    /// 所以等待超过 <see cref="DeliveryNoticeDelay"/> 时先回一句。这里不做本地放弃：主机的交付状态
+    /// 最迟会在查询有效期（1 小时）内变成成功/过期/失败，而用户重发单号会让主机重新压一遍。
+    /// </summary>
+    private async Task<RecordingDelivery> WaitForDeliveryAsync(
+        QQIncomingMessage message,
+        RecordingQuery query,
+        Recording recording,
+        RecordingDelivery delivery,
+        int sequence,
+        CancellationToken cancellationToken)
+    {
+        DateTimeOffset startedAt = DateTimeOffset.UtcNow;
+        bool notified = false;
+        while (delivery.Status is "queued" or "transcoding" or "downloading")
+        {
+            if (!notified && DateTimeOffset.UtcNow - startedAt >= DeliveryNoticeDelay)
+            {
+                notified = true;
+                await qq.SendTextAsync(message, DeliveryWaitingText, message.Id, sequence, cancellationToken);
+            }
+            await Task.Delay(1000, cancellationToken);
+            delivery = await packingProof.GetDeliveryAsync(query.QueryId, recording.RecordingId, delivery.DeliveryId, cancellationToken);
+        }
+        return delivery;
     }
 
     private static Recording[] GetSendableRecordings(RecordingQuery query) => query.Recordings
