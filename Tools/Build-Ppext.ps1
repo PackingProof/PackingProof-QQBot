@@ -51,6 +51,18 @@ try {
         throw "发布输出缺少 PackingProof.QQBot.exe"
     }
 
+    # 发布包里的《使用说明》是 PDF（用户双击即可阅读），每次发布都由 docs\新手指南.md 现场转换，
+    # 避免发布包里的教程和仓库里的新手指南脱节。
+    $guidePdfPath = Join-Path $payloadDirectory "使用说明.pdf"
+    & (Join-Path $PSScriptRoot "Build-UserGuidePdf.ps1") -OutputPath $guidePdfPath
+    if (-not (Test-Path -LiteralPath $guidePdfPath -PathType Leaf)) {
+        throw "发布输出缺少《使用说明.pdf》"
+    }
+    $guideHeader = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($guidePdfPath), 0, 5)
+    if ($guideHeader -ne "%PDF-") {
+        throw "生成的《使用说明.pdf》不是有效 PDF"
+    }
+
     $manifest = [ordered]@{
         schemaVersion = 1
         format = "packingproof-extension"
@@ -120,6 +132,28 @@ try {
         $ppextPath,
         [System.IO.Compression.CompressionLevel]::Optimal,
         $false)
+
+    foreach ($artifactPath in @($zipPath, $ppextPath)) {
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($artifactPath)
+        try {
+            $guideEntry = $archive.Entries | Where-Object { $_.Name -eq "使用说明.pdf" } | Select-Object -First 1
+            if (-not $guideEntry -or $guideEntry.Length -eq 0) {
+                throw "发布包缺少《使用说明.pdf》：$artifactPath"
+            }
+            $guideStream = $guideEntry.Open()
+            try {
+                $headerBytes = New-Object byte[] 5
+                $headerRead = $guideStream.Read($headerBytes, 0, 5)
+                if ($headerRead -ne 5 -or [System.Text.Encoding]::ASCII.GetString($headerBytes) -ne "%PDF-") {
+                    throw "发布包里的《使用说明.pdf》不是有效 PDF：$artifactPath"
+                }
+            }
+            finally { $guideStream.Dispose() }
+        }
+        finally {
+            $archive.Dispose()
+        }
+    }
 
     Write-Host "已生成：$zipPath"
     Write-Host "已生成：$ppextPath"
