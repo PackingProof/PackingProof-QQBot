@@ -2,6 +2,7 @@ using System.Windows;
 using System.Diagnostics;
 using WpfBorder = System.Windows.Controls.Border;
 using WpfButton = System.Windows.Controls.Button;
+using WpfCheckBox = System.Windows.Controls.CheckBox;
 using WpfComboBox = System.Windows.Controls.ComboBox;
 using WpfControl = System.Windows.Controls.Control;
 using WpfColumnDefinition = System.Windows.Controls.ColumnDefinition;
@@ -34,7 +35,7 @@ internal sealed class QQBotManagerWindow : Window
     private readonly WpfTextBlock _hostInfo = new();
     private readonly WpfTextBlock _status = new();
     private WpfButton? _botToggleButton;
-    private WpfButton? _startupButton;
+    private WpfCheckBox? _startupCheckBox;
     private WpfButton? _useSelectedHostButton;
 
     public QQBotManagerWindow(QQBotStateStore store, QQBotRuntime runtime)
@@ -73,8 +74,16 @@ internal sealed class QQBotManagerWindow : Window
         var controls = new WpfStackPanel();
         controls.Children.Add(_status);
         _botToggleButton = PrimaryButton("启动机器人", ToggleBot);
-        _startupButton = Button("", ToggleStartup);
-        controls.Children.Add(Row(_botToggleButton, _startupButton, Button("使用教程", OpenUserGuide)));
+        controls.Children.Add(Row(_botToggleButton, Button("使用教程", OpenUserGuide)));
+        // 自启动用复选框表达"当前状态"，比一个文字随状态变化的按钮更容易看懂。
+        _startupCheckBox = new WpfCheckBox
+        {
+            Content = "开机后自动启动机器人（在后台运行，不弹窗口）",
+            Foreground = Brush(51, 65, 85),
+            Margin = new Thickness(0, 10, 0, 0),
+            VerticalContentAlignment = VerticalAlignment.Center
+        }.Also(checkBox => checkBox.Click += StartupChanged);
+        controls.Children.Add(_startupCheckBox);
         panel.Children.Add(new WpfBorder { Background = Brush(239, 246, 255), BorderBrush = Brush(191, 219, 254), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(14, 10, 14, 10), Child = controls, Margin = new Thickness(0, 0, 0, 14) });
 
         var connection = FormGrid(7);
@@ -239,11 +248,11 @@ internal sealed class QQBotManagerWindow : Window
         RefreshGroups(config);
         RefreshHostInfo(config);
         RefreshLogText(false);
-        if (_startupButton != null) _startupButton.Content = config?.StartWithWindows == true ? "关闭开机自动启动" : "登录 Windows 后自动启动";
+        if (_startupCheckBox != null) _startupCheckBox.IsChecked = config?.StartWithWindows == true;
         RefreshBotButton();
         SetStatus(QQBotApplicationHost.CanAutoStart(config, secrets)
-            ? "管理器已就绪，机器人将自动启动"
-            : "请填写 QQ AppID、AppSecret 和 PackingProof 地址，然后保存并授权");
+            ? "配置已完成，机器人会自动连接 PackingProof"
+            : "请填写 QQ AppID、AppSecret 和 PackingProof 地址，然后点「保存并授权」");
     }
 
     private void RefreshGroups(QQBotConfiguration? config = null)
@@ -385,14 +394,27 @@ internal sealed class QQBotManagerWindow : Window
         }
         return "";
     }
-    private void ToggleStartup(object sender, RoutedEventArgs eventArgs)
+    /// <summary>
+    /// 勾选/取消"开机后自动启动"。勾选状态就是最终状态：勾上就写注册表并保存配置，
+    /// 取消就删掉注册表项；没配好就先把勾去掉并提示，不要让人对着一个勾着但没生效的框发愣。
+    /// </summary>
+    private void StartupChanged(object sender, RoutedEventArgs eventArgs)
     {
-        QQBotConfiguration config = RequireConfig();
-        bool enabled = !config.StartWithWindows;
+        QQBotConfiguration? config = _store.LoadConfiguration();
+        QQBotSecrets? secrets = _store.LoadSecrets();
+        if (config == null || secrets == null)
+        {
+            if (_startupCheckBox != null) _startupCheckBox.IsChecked = false;
+            SetStatus("请先填写上面的 QQ 信息并点「保存并授权」，然后再勾选开机自动启动");
+            return;
+        }
+
+        bool enabled = _startupCheckBox?.IsChecked == true;
         WindowsStartup.SetEnabled(enabled);
-        _store.Save(config with { StartWithWindows = enabled }, RequireSecrets());
-        if (_startupButton != null) _startupButton.Content = enabled ? "关闭开机自动启动" : "登录 Windows 后自动启动";
-        SetStatus(enabled ? "已设置登录 Windows 后后台启动" : "已关闭开机自动启动");
+        _store.Save(config with { StartWithWindows = enabled }, secrets);
+        SetStatus(enabled
+            ? "已开启：开机后会自动启动机器人（在后台运行，不弹窗口）"
+            : "已关闭：开机后不会再自动启动机器人");
     }
     private QQBotConfiguration RequireConfig() => _store.LoadConfiguration() ?? throw new InvalidOperationException("请先保存并授权");
     private QQBotSecrets RequireSecrets() => _store.LoadSecrets() ?? throw new InvalidOperationException("请先保存并授权");
