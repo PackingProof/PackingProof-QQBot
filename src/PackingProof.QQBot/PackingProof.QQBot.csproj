@@ -15,6 +15,5 @@
     <Version>0.0.7</Version>
     <PublishSingleFile>false</PublishSingleFile>
     <UseWPF>true</UseWPF>
-    <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
 </Project>
