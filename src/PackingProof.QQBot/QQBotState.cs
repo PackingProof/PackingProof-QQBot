@@ -61,7 +61,12 @@ public sealed class QQBotStateStore
     private readonly object _gate = new();
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
-    public QQBotStateStore(string? directory = null) => _directory = directory ?? ResolveDefaultDirectory();
+    public QQBotStateStore(string? directory = null)
+    {
+        _directory = directory ?? ResolveDefaultDirectory();
+        // 只有"自己算出来的默认目录"才做老配置迁移；测试或调用方显式指定的目录一律不动。
+        if (directory == null) MigrateLegacyState(ResolveLegacyRoot(), _directory);
+    }
 
     public string DirectoryPath => _directory;
     public event Action? GroupsChanged;
@@ -175,11 +180,71 @@ public sealed class QQBotStateStore
         return normalized;
     }
 
-    private static string ResolveDefaultDirectory()
+    /// <summary>
+    /// 规范位置：桌面端启动扩展时注入 <c>PACKINGPROOF_EXTENSION_DATA_DIR</c>
+    /// （<c>%LOCALAPPDATA%\ExpressPackingMonitoring\extension-data\&lt;id&gt;</c>）。
+    /// 手动运行或开机自启时没有这个变量，就按同一条约定自行推导——两种启动方式必须读写同一份数据，
+    /// 不能一个看注入目录、一个看老目录。
+    /// </summary>
+    private static string ResolveDefaultDirectory() =>
+        ResolveDirectory(
+            Environment.GetEnvironmentVariable("PACKINGPROOF_EXTENSION_DATA_DIR"),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+
+    internal static string ResolveDirectory(string? overridePath, string localAppDataRoot)
     {
-        string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ExpressPackingMonitoring");
-        string current = Path.Combine(root, "QQBot");
-        string legacy = Path.Combine(root, "QqBot");
-        return !Directory.Exists(current) && Directory.Exists(legacy) ? legacy : current;
+        string trimmed = (overridePath ?? "").Trim();
+        if (trimmed.Length > 0) return Path.GetFullPath(trimmed);
+        return Path.Combine(
+            Path.GetFullPath(localAppDataRoot),
+            "ExpressPackingMonitoring",
+            "extension-data",
+            "packingproof.qqbot");
     }
+
+    /// <summary>
+    /// 0.0.7 及以前把配置放在 <c>%LOCALAPPDATA%\ExpressPackingMonitoring\QQBot\</c>（更早是 <c>QqBot\</c>）。
+    /// 迁到规范目录时只复制 <c>settings.json</c> 与 <c>secrets.dat</c>；
+    /// 目标目录已经有配置就不动，避免覆盖用户后来改过的设置。旧文件**保留**：万一自启动项还指着
+    /// 旧版本目录（自动更新后的典型情况），旧版本启动时仍能读到原来的配置，不会变成"未配置"。
+    /// </summary>
+    internal static void MigrateLegacyState(string legacyRoot, string targetDirectory)
+    {
+        try
+        {
+            string? legacyDirectory = new[] { "QQBot", "QqBot" }
+                .Select(name => Path.Combine(legacyRoot, name))
+                .FirstOrDefault(directory =>
+                    File.Exists(Path.Combine(directory, "settings.json"))
+                    || File.Exists(Path.Combine(directory, "secrets.dat")));
+            if (legacyDirectory == null) return;
+
+            string target = Path.GetFullPath(targetDirectory);
+            if (string.Equals(Path.GetFullPath(legacyDirectory), target, StringComparison.OrdinalIgnoreCase))
+                return;
+            if (File.Exists(Path.Combine(target, "settings.json"))
+                || File.Exists(Path.Combine(target, "secrets.dat")))
+            {
+                return;
+            }
+
+            Directory.CreateDirectory(target);
+            foreach (string fileName in new[] { "settings.json", "secrets.dat" })
+            {
+                string source = Path.Combine(legacyDirectory, fileName);
+                string destination = Path.Combine(target, fileName);
+                if (File.Exists(source) && !File.Exists(destination))
+                    File.Copy(source, destination);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // 迁移失败不阻断启动：用户在界面上重新保存一次就会写到规范目录。
+        }
+    }
+
+    private static string ResolveLegacyRoot() =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "ExpressPackingMonitoring");
 }

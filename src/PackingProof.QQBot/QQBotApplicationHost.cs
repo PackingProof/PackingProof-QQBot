@@ -32,7 +32,10 @@ internal sealed class QQBotApplicationHost : IDisposable
                 _application.Dispatcher.BeginInvoke(ShowWindow), null, Timeout.Infinite, false);
         }
         CreateTrayIcon();
-        if (CanAutoStart(_store.LoadConfiguration(), _store.LoadSecrets()))
+        QQBotConfiguration? configuration = _store.LoadConfiguration();
+        // 自动更新会换到新的版本目录：开了开机自启就把注册表里的路径改成当前这一份。
+        WindowsStartup.RefreshIfEnabled(configuration?.StartWithWindows == true);
+        if (CanAutoStart(configuration, _store.LoadSecrets()))
         {
             _runtime.Start();
         }

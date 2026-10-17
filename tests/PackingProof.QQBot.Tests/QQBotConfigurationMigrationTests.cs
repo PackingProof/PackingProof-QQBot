@@ -35,6 +35,73 @@ public sealed class QQBotConfigurationMigrationTests
         Assert.Equal("新的打包主机", configuration.PackingProofNodeName);
     }
 
+    /// <summary>
+    /// 老版本把配置放在 QQBot\，规范位置是 extension-data\packingproof.qqbot。
+    /// 迁移只复制 settings.json / secrets.dat；旧文件保留（自启动还指着旧版本目录时，旧版本仍能读）。
+    /// </summary>
+    [Fact]
+    public void StateStore_MigratesLegacyConfigurationToTheExtensionDataDirectory()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "PackingProof-QQBot-Migrate-" + Guid.NewGuid().ToString("N"));
+        string legacy = Path.Combine(root, "QQBot");
+        string target = Path.Combine(root, "extension-data", "packingproof.qqbot");
+        try
+        {
+            Directory.CreateDirectory(legacy);
+            File.WriteAllText(Path.Combine(legacy, "settings.json"), """{"appId":"legacy-app"}""");
+            File.WriteAllBytes(Path.Combine(legacy, "secrets.dat"), [1, 2, 3]);
+
+            QQBotStateStore.MigrateLegacyState(root, target);
+
+            Assert.True(File.Exists(Path.Combine(target, "settings.json")));
+            Assert.True(File.Exists(Path.Combine(target, "secrets.dat")));
+            Assert.True(File.Exists(Path.Combine(legacy, "settings.json")), "旧文件保留，旧版本/回滚还能读");
+            Assert.True(File.Exists(Path.Combine(legacy, "secrets.dat")));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    /// <summary>新目录里已经有配置时（用户后来在新版本里改过）绝不能被旧文件覆盖。</summary>
+    [Fact]
+    public void StateStore_DoesNotOverwriteConfigurationAlreadyInTheNewDirectory()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "PackingProof-QQBot-Migrate-" + Guid.NewGuid().ToString("N"));
+        string legacy = Path.Combine(root, "QQBot");
+        string target = Path.Combine(root, "extension-data", "packingproof.qqbot");
+        try
+        {
+            Directory.CreateDirectory(legacy);
+            Directory.CreateDirectory(target);
+            File.WriteAllText(Path.Combine(legacy, "settings.json"), """{"appId":"old"}""");
+            File.WriteAllText(Path.Combine(target, "settings.json"), """{"appId":"new"}""");
+
+            QQBotStateStore.MigrateLegacyState(root, target);
+
+            Assert.Equal("""{"appId":"new"}""", File.ReadAllText(Path.Combine(target, "settings.json")));
+            Assert.True(File.Exists(Path.Combine(legacy, "settings.json")));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    /// <summary>桌面端注入的数据目录优先；没有注入时按规范自行推导，两种启动方式必须指向同一份数据。</summary>
+    [Fact]
+    public void ResolveDirectory_UsesInjectedDirectoryOrTheCanonicalOne()
+    {
+        Assert.Equal(
+            Path.GetFullPath(@"C:\inject\extension-data"),
+            QQBotStateStore.ResolveDirectory(@"C:\inject\extension-data", @"C:\Users\Test\AppData\Local"));
+
+        Assert.Equal(
+            Path.Combine(@"C:\Users\Test\AppData\Local", "ExpressPackingMonitoring", "extension-data", "packingproof.qqbot"),
+            QQBotStateStore.ResolveDirectory("", @"C:\Users\Test\AppData\Local"));
+    }
+
     [Fact]
     public void StateStore_RecordsSeenGroupsAndAppliesPermissionWithoutRestart()
     {
