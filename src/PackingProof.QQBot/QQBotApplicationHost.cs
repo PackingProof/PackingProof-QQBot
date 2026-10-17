@@ -8,7 +8,7 @@ internal sealed class QQBotApplicationHost : IDisposable
     private readonly bool _startInBackground;
     private readonly EventWaitHandle? _activationEvent;
     private readonly QQBotRuntime _runtime;
-    private System.Windows.Forms.NotifyIcon? _trayIcon;
+    private TrayIconService? _trayIcon;
     private RegisteredWaitHandle? _activationRegistration;
     private QQBotManagerWindow? _window;
     private System.Windows.Application? _application;
@@ -56,17 +56,8 @@ internal sealed class QQBotApplicationHost : IDisposable
 
     private void CreateTrayIcon()
     {
-        var menu = new System.Windows.Forms.ContextMenuStrip();
-        menu.Items.Add("打开管理界面", null, (_, _) => _application?.Dispatcher.BeginInvoke(ShowWindow));
-        menu.Items.Add("退出 QQBot", null, (_, _) => _application?.Dispatcher.BeginInvoke(Exit));
-        _trayIcon = new System.Windows.Forms.NotifyIcon
-        {
-            Text = "PackingProof QQBot",
-            ContextMenuStrip = menu,
-            Visible = true,
-            Icon = System.Drawing.SystemIcons.Application
-        };
-        _trayIcon.DoubleClick += (_, _) => _application?.Dispatcher.BeginInvoke(ShowWindow);
+        if (_window == null) return;
+        _trayIcon = new TrayIconService(_window, ShowWindow, Exit);
     }
 
     private void ShowWindow()
