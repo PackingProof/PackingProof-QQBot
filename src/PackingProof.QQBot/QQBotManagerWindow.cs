@@ -341,9 +341,26 @@ internal sealed class QQBotManagerWindow : Window
 
     private void SaveDelivery(object sender, RoutedEventArgs eventArgs)
     {
-        if (!int.TryParse(_size.Text, out int size)) { SetStatus("视频大小必须是数字"); return; }
-        QQBotConfiguration config = (RequireConfig() with { DeliveryMaxSizeMb = size, DeliveryProfile = _profile.SelectedIndex == 1 ? QQBotConfiguration.H265TargetSizeProfile : QQBotConfiguration.SourceCodecTargetSizeProfile }).ValidateDeliverySettings();
-        _store.Save(config, RequireSecrets()); SetStatus("视频设置已保存");
+        string? validationError = ValidateDeliverySizeInput(_size.Text, out int size);
+        if (validationError != null) { SetStatus(validationError); return; }
+        try
+        {
+            QQBotConfiguration config = (RequireConfig() with { DeliveryMaxSizeMb = size, DeliveryProfile = _profile.SelectedIndex == 1 ? QQBotConfiguration.H265TargetSizeProfile : QQBotConfiguration.SourceCodecTargetSizeProfile }).ValidateDeliverySettings();
+            _store.Save(config, RequireSecrets());
+            _size.Text = size.ToString();
+            SetStatus($"视频设置已保存：上限 {size} MB");
+        }
+        catch (Exception exception) { SetStatus("保存视频设置失败：" + exception.Message); }
+    }
+
+    /// <summary>视频上限的界面校验不能抛异常：未捕获的校验错误会直接结束整个管理器进程。</summary>
+    internal static string? ValidateDeliverySizeInput(string? text, out int size)
+    {
+        if (!int.TryParse((text ?? "").Trim(), out size))
+            return $"未保存：视频上限必须是 {QQBotConfiguration.MinimumDeliveryMaxSizeMb} 到 {QQBotConfiguration.MaximumDeliveryMaxSizeMb} 的整数";
+        if (size is < QQBotConfiguration.MinimumDeliveryMaxSizeMb or > QQBotConfiguration.MaximumDeliveryMaxSizeMb)
+            return $"未保存：视频上限必须在 {QQBotConfiguration.MinimumDeliveryMaxSizeMb} 到 {QQBotConfiguration.MaximumDeliveryMaxSizeMb} MB 之间";
+        return null;
     }
 
     private void ToggleBot(object sender, RoutedEventArgs eventArgs)
