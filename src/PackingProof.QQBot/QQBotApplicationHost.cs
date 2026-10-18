@@ -12,6 +12,7 @@ internal sealed class QQBotApplicationHost : IDisposable
     private RegisteredWaitHandle? _activationRegistration;
     private QQBotManagerWindow? _window;
     private System.Windows.Application? _application;
+    private bool _exiting;
 
     public QQBotApplicationHost(QQBotStateStore store, bool startInBackground, EventWaitHandle? activationEvent)
     {
@@ -62,21 +63,23 @@ internal sealed class QQBotApplicationHost : IDisposable
 
     private void ShowWindow()
     {
-        if (_window == null) return;
-        _window.Show();
+        if (_window == null || _exiting) return;
+        if (!_window.IsVisible) _window.Show();
         _window.WindowState = WindowState.Normal;
         _window.Activate();
     }
 
     private void OnWindowClosing(object? sender, System.ComponentModel.CancelEventArgs eventArgs)
     {
-        if (!_runtime.IsRunning) return;
+        if (_exiting) return;
+        // 关闭按钮只隐藏窗口。窗口一旦真正关闭，托盘或单实例激活再调用 Show 会抛异常。
         eventArgs.Cancel = true;
         _window?.Hide();
     }
 
     private void Exit()
     {
+        _exiting = true;
         _runtime.Stop();
         _trayIcon?.Dispose();
         _trayIcon = null;
