@@ -24,12 +24,13 @@ PackingProof 是开源免费的电商打包录像与发货风险拦截系统：�
 | 平台 | 状态 | 获取方式 |
 | --- | --- | --- |
 | Windows 电脑端（机器人运行环境） | 正式版 | [GitHub Releases](https://github.com/PackingProof/PackingProof-Desktop/releases) · [Gitee Releases](https://gitee.com/PackingProof/PackingProof-Desktop/releases) |
+| Windows 电脑端（Microsoft Store） | 正式版 | [Microsoft Store](https://apps.microsoft.com/detail/9PKXFSV7ZQPV) |
 | macOS 电脑端（保存主机与查看端） | 正式版 | [GitHub Releases](https://github.com/PackingProof/PackingProof-Desktop/releases) · [Gitee Releases](https://gitee.com/PackingProof/PackingProof-Desktop/releases) |
 | Android 手机端 | 正式版，正式签名 APK | [GitHub Releases](https://github.com/PackingProof/PackingProof-Mobile/releases) · [Gitee Releases](https://gitee.com/PackingProof/PackingProof-Mobile/releases) |
 | iOS 手机端 | 功能与 Android 一致，TestFlight 分发 | [加入 TestFlight 内测](https://testflight.apple.com/join/KR4qNs6t) |
 | 备用下载（国内网络） | 百度网盘：电脑端完整安装包 | [百度网盘](https://pan.baidu.com/s/1B9L9l19ZkjtNpK_9rVZxbw?pwd=6666)（提取码 6666） |
 
-> **国内网络**：GitHub 访问不畅时，可用上面的 Gitee 镜像克隆源码、提交 Issue 或下载 Release；Gitee Release 的 Windows 安装包是 `PackingProof_Setup_no-runtime_vX.Y.Z.exe`（不含 .NET 运行时，约 60MB），需要先安装 [.NET 8 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/8.0)；含运行时的完整安装包可走上面的百度网盘备用链接。
+> **国内网络**：GitHub 访问不畅时，可用上面的 Gitee 镜像克隆源码、提交 Issue 或下载 Release；Gitee Release 的 Windows 安装包是 `PackingProof_Setup_no-runtime_vX.Y.Z.exe`（不含 .NET 运行时，约 60MB），需要先安装 [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)；含运行时的完整安装包可走上面的百度网盘备用链接。
 
 检索关键词：PackingProof、QQ 机器人、快递单号查录像、打包录像、售后举证、扫码录像、企业微信机器人、快麦 ERP、快递助手；PackingProof QQ bot, query packing video by tracking number, parcel packing video evidence。
 
