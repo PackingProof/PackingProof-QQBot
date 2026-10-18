@@ -15,5 +15,6 @@
     <Version>0.0.7</Version>
     <PublishSingleFile>false</PublishSingleFile>
     <UseWPF>true</UseWPF>
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 </Project>
