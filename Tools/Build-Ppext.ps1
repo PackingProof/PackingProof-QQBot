@@ -107,8 +107,8 @@ try {
             # 机器人已迁到 .NET 10，必须用桌面端共享运行时里的 10.x 框架（0.0.82 起的布局才是 .NET 10，
             # 0.0.63~0.0.81 是 .NET 8，装上去起不来）。
             # 另外机器人现在的配置目录走扩展 API 规范：桌面端注入 PACKINGPROOF_EXTENSION_DATA_DIR、
-            # 卸载时清理 extension-data，这两件事从 0.0.85 才有；所以门槛定 0.0.85。
-            minPackingProofVersion = "0.0.85"
+            # 卸载时清理 extension-data，这两件事从首个正式发布的 0.0.86 才有；所以门槛定 0.0.86。
+            minPackingProofVersion = "0.0.86"
             platforms = [ordered]@{
                 windows = @("x64")
             }
