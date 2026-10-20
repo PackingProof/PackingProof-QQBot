@@ -281,7 +281,7 @@ if ($Target -eq "both" -or $Target -eq "gitee") {
     & gitee release view $Tag --repo $repository *> $null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  发布不存在，创建 Release"
-        & gitee release create --repo $repository --tag $Tag --name $releaseTitle --notes $notesText
+        & gitee release create --repo $repository --tag $Tag --name $releaseTitle --notes $notesText --target main
         if ($LASTEXITCODE -ne 0) { throw "gitee release create 失败，退出码 $LASTEXITCODE" }
     }
     else {
