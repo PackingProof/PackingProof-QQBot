@@ -427,11 +427,22 @@ internal sealed class QQBotManagerWindow : Window
         }
 
         bool enabled = _startupCheckBox?.IsChecked == true;
-        WindowsStartup.SetEnabled(enabled);
-        _store.Save(config with { StartWithWindows = enabled }, secrets);
-        SetStatus(enabled
-            ? "已开启：开机后会自动启动机器人（在后台运行，不弹窗口）"
-            : "已关闭：开机后不会再自动启动机器人");
+        try
+        {
+            WindowsStartup.SetEnabled(
+                enabled,
+                dataDirectory: _store.DirectoryPath,
+                runtimeRoot: Environment.GetEnvironmentVariable("DOTNET_ROOT"));
+            _store.Save(config with { StartWithWindows = enabled }, secrets);
+            SetStatus(enabled
+                ? "已开启：开机后会自动启动机器人（在后台运行，不弹窗口）"
+                : "已关闭：开机后不会再自动启动机器人");
+        }
+        catch (Exception exception)
+        {
+            if (_startupCheckBox != null) _startupCheckBox.IsChecked = config.StartWithWindows;
+            SetStatus("无法更新开机自动启动设置：" + exception.Message);
+        }
     }
     private QQBotConfiguration RequireConfig() => _store.LoadConfiguration() ?? throw new InvalidOperationException("请先保存并授权");
     private QQBotSecrets RequireSecrets() => _store.LoadSecrets() ?? throw new InvalidOperationException("请先保存并授权");

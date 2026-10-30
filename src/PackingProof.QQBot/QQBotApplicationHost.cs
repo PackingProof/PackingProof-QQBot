@@ -35,7 +35,18 @@ internal sealed class QQBotApplicationHost : IDisposable
         CreateTrayIcon();
         QQBotConfiguration? configuration = _store.LoadConfiguration();
         // 自动更新会换到新的版本目录：开了开机自启就把注册表里的路径改成当前这一份。
-        WindowsStartup.RefreshIfEnabled(configuration?.StartWithWindows == true);
+        try
+        {
+            WindowsStartup.RefreshIfEnabled(
+                configuration?.StartWithWindows == true,
+                dataDirectory: _store.DirectoryPath,
+                runtimeRoot: Environment.GetEnvironmentVariable("DOTNET_ROOT"));
+        }
+        catch (Exception exception)
+        {
+            // 自启动项刷新失败不能阻止用户手动打开并继续使用机器人。
+            QQBotLog.Write("更新开机自动启动项失败：" + exception.Message);
+        }
         if (CanAutoStart(configuration, _store.LoadSecrets()))
         {
             _runtime.Start();
