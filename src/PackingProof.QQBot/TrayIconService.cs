@@ -5,7 +5,7 @@ using System.Windows.Interop;
 namespace PackingProof.QQBot;
 
 /// <summary>
-/// QQBot 插件的托盘图标。插件版由宿主通过 DOTNET_ROOT 复用共享运行时，
+/// QQBot 插件的托盘图标。市场版由原生启动器/宿主提供 DOTNET_ROOT 复用共享运行时，
 /// 因此这里不能依赖 WinForms，只用 Windows 原生的 Shell_NotifyIcon。
 /// </summary>
 internal sealed class TrayIconService : IDisposable

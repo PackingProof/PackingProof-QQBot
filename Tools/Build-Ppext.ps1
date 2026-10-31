@@ -8,6 +8,7 @@ Set-StrictMode -Version Latest
 
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $projectPath = Join-Path $repositoryRoot "src\PackingProof.QQBot\PackingProof.QQBot.csproj"
+$bootstrapProjectPath = Join-Path $repositoryRoot "src\PackingProof.QQBot.Bootstrap\PackingProof.QQBot.Bootstrap.csproj"
 $releaseRoot = Join-Path $repositoryRoot "Release"
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
@@ -43,16 +44,29 @@ function Assert-UnderReleaseRoot([string]$Path) {
 
 try {
     [System.IO.Directory]::CreateDirectory($payloadDirectory) | Out-Null
-    # 市场版（.ppext）由 PackingProof 桌面端启动，桌面端把自己的共享运行时通过 DOTNET_ROOT 交给它用，
-    # 所以这里按框架依赖发布：几十 KB，不再自带整套 .NET。
-    & dotnet publish $projectPath -c Release -r win-x64 --self-contained false -p:Version=$Version -o $payloadDirectory
+    # 市场版由原生引导器接管双击入口：引导器自己找 Desktop 共享运行时，再拉起框架依赖的托管程序。
+    # 这样无论是扩展市场启动、开机自启还是直接双击 PackingProof.QQBot.exe，都不会在托管代码运行前弹 .NET 提示。
+    & dotnet publish $projectPath -c Release -r win-x64 --self-contained false `
+        -p:Version=$Version -p:AssemblyName=PackingProof.QQBot.Managed `
+        -p:DebugType=None -p:DebugSymbols=false -o $payloadDirectory
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish 失败，退出码：$LASTEXITCODE"
     }
+    & dotnet publish $bootstrapProjectPath -c Release -r win-x64 `
+        -p:Version=$Version -p:AssemblyName=PackingProof.QQBot `
+        -p:DebugType=None -p:DebugSymbols=false -o $payloadDirectory
+    if ($LASTEXITCODE -ne 0) {
+        throw "原生启动器 dotnet publish 失败，退出码：$LASTEXITCODE"
+    }
+    Get-ChildItem -LiteralPath $payloadDirectory -File -Filter "*.pdb" | Remove-Item -Force
 
     $executablePath = Join-Path $payloadDirectory "PackingProof.QQBot.exe"
     if (-not (Test-Path -LiteralPath $executablePath)) {
-        throw "发布输出缺少 PackingProof.QQBot.exe"
+        throw "发布输出缺少原生启动器 PackingProof.QQBot.exe"
+    }
+    $managedExecutablePath = Join-Path $payloadDirectory "PackingProof.QQBot.Managed.exe"
+    if (-not (Test-Path -LiteralPath $managedExecutablePath)) {
+        throw "发布输出缺少托管程序 PackingProof.QQBot.Managed.exe"
     }
     foreach ($runtimeOnlyFile in @("coreclr.dll", "hostfxr.dll", "System.Private.CoreLib.dll", "PresentationFramework.dll")) {
         if (Test-Path -LiteralPath (Join-Path $payloadDirectory $runtimeOnlyFile)) {
@@ -60,8 +74,8 @@ try {
         }
     }
     $payloadBytes = (Get-ChildItem -LiteralPath $payloadDirectory -File -Recurse | Measure-Object Length -Sum).Sum
-    if ($payloadBytes -gt 8MB) {
-        throw ("市场版 payload 体积异常：{0:N1} MB，应当只有几十 KB 量级" -f ($payloadBytes / 1MB))
+    if ($payloadBytes -gt 16MB) {
+        throw ("市场版 payload 体积异常：{0:N1} MB，超过原生引导器 + 框架依赖程序的预期上限" -f ($payloadBytes / 1MB))
     }
 
     # 跨机使用的独立包仍带自己的运行时（那种场景没有桌面端可复用），保持“免装 .NET”的承诺。

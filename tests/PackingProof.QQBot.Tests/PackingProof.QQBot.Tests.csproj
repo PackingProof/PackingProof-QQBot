@@ -12,6 +12,7 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/PackingProof.QQBot.Bootstrap/PackingProof.QQBot.Bootstrap.csproj" />
     <ProjectReference Include="../../src/PackingProof.QQBot/PackingProof.QQBot.csproj" />
   </ItemGroup>
 </Project>

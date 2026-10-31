@@ -144,7 +144,7 @@ foreach ($required in @("PackingProof.QQBot.exe", "使用说明.pdf")) {
         throw "独立包缺少 $required：$zipName"
     }
 }
-foreach ($required in @("manifest.json", "README.md", "payload/PackingProof.QQBot.exe", "payload/使用说明.pdf")) {
+foreach ($required in @("manifest.json", "README.md", "payload/PackingProof.QQBot.exe", "payload/PackingProof.QQBot.Managed.exe", "payload/使用说明.pdf")) {
     if (-not (Test-ZipHasEntry -ZipPath $ppextPath -Name $required)) {
         throw "市场插件缺少 $required：$ppextName"
     }
