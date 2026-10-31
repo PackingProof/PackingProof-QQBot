@@ -48,7 +48,7 @@ try {
     # 这样无论是扩展市场启动、开机自启还是直接双击 PackingProof.QQBot.exe，都不会在托管代码运行前弹 .NET 提示。
     & dotnet publish $projectPath -c Release -r win-x64 --self-contained false `
         -p:Version=$Version -p:AssemblyName=PackingProof.QQBot.Managed `
-        -p:DebugType=None -p:DebugSymbols=false -o $payloadDirectory
+        -p:ApplicationIcon= -p:DebugType=None -p:DebugSymbols=false -o $payloadDirectory
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish 失败，退出码：$LASTEXITCODE"
     }
@@ -67,6 +67,27 @@ try {
     $managedExecutablePath = Join-Path $payloadDirectory "PackingProof.QQBot.Managed.exe"
     if (-not (Test-Path -LiteralPath $managedExecutablePath)) {
         throw "发布输出缺少托管程序 PackingProof.QQBot.Managed.exe"
+    }
+    Add-Type -TypeDefinition @"
+        using System;
+        using System.Runtime.InteropServices;
+        public static class PackingProofIconProbe
+        {
+            [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+            public static extern uint ExtractIconEx(string file, int index, out IntPtr large, out IntPtr small, uint count);
+        }
+"@ -ErrorAction SilentlyContinue
+    function Get-ExecutableIconCount([string]$Path)
+    {
+        [IntPtr]$large = [IntPtr]::Zero
+        [IntPtr]$small = [IntPtr]::Zero
+        return [PackingProofIconProbe]::ExtractIconEx($Path, 0, [ref]$large, [ref]$small, 1)
+    }
+    if ((Get-ExecutableIconCount $executablePath) -eq 0) {
+        throw "公开入口 PackingProof.QQBot.exe 缺少应用图标"
+    }
+    if ((Get-ExecutableIconCount $managedExecutablePath) -ne 0) {
+        throw "内部程序 PackingProof.QQBot.Managed.exe 不应携带公开入口图标"
     }
     foreach ($runtimeOnlyFile in @("coreclr.dll", "hostfxr.dll", "System.Private.CoreLib.dll", "PresentationFramework.dll")) {
         if (Test-Path -LiteralPath (Join-Path $payloadDirectory $runtimeOnlyFile)) {
